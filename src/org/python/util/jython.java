@@ -527,6 +527,18 @@ public class jython {
      * @param args arguments to the program.
      */
     public static void main(String[] args) {
+        // Select before parsing Jython options or initializing its Python 2 runtime.
+        String runtime = System.getProperty("python.runtime", "jython");
+        if ("cpython".equals(runtime)) {
+            System.exit(CPythonLauncher.run(args));
+            return;
+        } else if (!"jython".equals(runtime)) {
+            System.err.println("Unknown python.runtime: " + runtime
+                    + "; expected jython or cpython");
+            System.exit(2);
+            return;
+        }
+
         // Parse the command line options
         CommandLineOptions opts = CommandLineOptions.parse(args);
 

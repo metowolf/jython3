@@ -16,6 +16,13 @@ No whole-language Python 3 minor-version compatibility is advertised. The
 implemented signatures include Python 3.0 syntax and positional-only syntax
 from Python 3.8.
 
+The application execution target is now **CPython 3.15.2 final**, available via
+an optional [separate-process backend](Doc/cpython-backend.md). Use `jython3` or
+`-Dpython.runtime=cpython` on the Java CLI to select it. This runs real CPython
+with its own standard library; it does not upgrade the native runtime described
+in this document. `PythonInterpreter` and direct Java imports retain their
+existing JVM behavior. Native migration work below remains outstanding.
+
 ## Implemented function syntax
 
 | Feature | Behavior |

@@ -5,8 +5,8 @@
 
 This is the development repository of Jython,
 the implementation of Python in Java.
-Only version 2.7 of Python can be supported at present
-(but watch this space for a 3.x version).
+The native JVM runtime currently targets Python 2.7. This checkout also offers
+an optional CPython 3.15.2 process backend, described below.
 
 This working tree contains an experimental, native Python 3 migration:
 function annotations, keyword-only and positional-only parameters, `nonlocal`,
@@ -17,6 +17,25 @@ implemented. Some Python 2 behaviors deliberately change, including closure-cell
 deletion and restoration of exception state when leaving a handler. See
 [migration status](PYTHON3_MIGRATION.md) for the supported subset, build commands,
 tests, compatibility boundaries, and remaining work.
+
+## Optional CPython 3.15.2 backend
+
+For Python 3.15.2 applications, this checkout can launch an actual, private
+CPython interpreter as a separate process. With native build dependencies
+installed, run:
+
+```sh
+python3 -B tools/install_cpython.py
+ant jar copy-dev
+dist/bin/jython3 -B Demo/python3_stdlib_smoke.py
+```
+
+Alternatively configure `JYTHON_CPYTHON_EXECUTABLE` to an existing CPython
+3.15.2 final executable. See [installation and Java integration](Doc/cpython-backend.md)
+for dependencies, version checks, command-line options and acceptance tests.
+This is not native JVM Python 3 or JNI embedding: `PythonInterpreter`, `PyObject`
+and direct `import java` interoperation remain on the original Jython path.
+The default `jython` command is unchanged; `jython3` selects CPython explicitly.
 
 ## Compatibility
 
