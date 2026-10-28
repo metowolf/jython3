@@ -5,6 +5,11 @@ package org.python.compiler;
 import org.python.antlr.Visitor;
 import org.python.antlr.PythonTree;
 import org.python.antlr.ast.ClassDef;
+import org.python.antlr.ast.Assign;
+import org.python.antlr.ast.AugAssign;
+import org.python.antlr.ast.Delete;
+import org.python.antlr.ast.For;
+import org.python.antlr.ast.Dict;
 import org.python.antlr.ast.DictComp;
 import org.python.antlr.ast.Exec;
 import org.python.antlr.ast.Expression;
@@ -27,6 +32,10 @@ import org.python.antlr.ast.SetComp;
 import org.python.antlr.ast.Tuple;
 import org.python.antlr.ast.With;
 import org.python.antlr.ast.Yield;
+import org.python.antlr.ast.Starred;
+import org.python.antlr.ast.Attribute;
+import org.python.antlr.ast.Subscript;
+import org.python.antlr.ast.Set;
 import org.python.antlr.ast.arguments;
 import org.python.antlr.ast.comprehension;
 import org.python.antlr.ast.expr_contextType;
@@ -235,6 +244,174 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     }
 
     @Override
+    public Object visitStarred(Starred node) throws Exception {
+        code_compiler.error("starred expression is not allowed here", true, node);
+        return null;
+    }
+
+    private Object visitUnpackingSequence(List<expr> elements, expr_contextType context)
+            throws Exception {
+        boolean starred = false;
+        for (expr element : elements) {
+            if (element instanceof Starred) {
+                Starred star = (Starred)element;
+                if (context != expr_contextType.Load && context != expr_contextType.Store) {
+                    code_compiler.error("starred expression is not allowed in this context", true, star);
+                }
+                if (star.getInternalCtx() != context || star.getInternalValue() == null) {
+                    code_compiler.error("invalid starred expression context or value", true, star);
+                }
+                if (context == expr_contextType.Store) {
+                    if (starred) {
+                        code_compiler.error("multiple starred expressions in assignment", true, star);
+                    }
+                    validateStarTarget(star.getInternalValue());
+                } else if (expressionContext(star.getInternalValue()) != expr_contextType.Load) {
+                    code_compiler.error("starred iterable must have Load context", true, star);
+                }
+                starred = true;
+                visit(star.getInternalValue());
+            } else {
+                visit(element);
+            }
+        }
+        return null;
+    }
+
+    private expr_contextType expressionContext(expr value) {
+        if (value instanceof Name) {
+            return ((Name)value).getInternalCtx();
+        } else if (value instanceof Attribute) {
+            return ((Attribute)value).getInternalCtx();
+        } else if (value instanceof Subscript) {
+            return ((Subscript)value).getInternalCtx();
+        } else if (value instanceof Tuple) {
+            return ((Tuple)value).getInternalCtx();
+        } else if (value instanceof org.python.antlr.ast.List) {
+            return ((org.python.antlr.ast.List)value).getInternalCtx();
+        } else if (value instanceof Starred) {
+            return ((Starred)value).getInternalCtx();
+        }
+        return expr_contextType.Load;
+    }
+
+    private void validateStarTarget(expr target) throws Exception {
+        List<expr> children = null;
+        if (target instanceof Name) {
+            String name = ((Name)target).getInternalId();
+            if ("None".equals(name) || "True".equals(name) || "False".equals(name)) {
+                code_compiler.error("cannot assign to " + name, true, target);
+            }
+        } else if (target instanceof Tuple) {
+            children = ((Tuple)target).getInternalElts();
+        } else if (target instanceof org.python.antlr.ast.List) {
+            children = ((org.python.antlr.ast.List)target).getInternalElts();
+        } else if (!(target instanceof Attribute || target instanceof Subscript)) {
+            code_compiler.error("invalid starred assignment target", true, target);
+            return;
+        }
+        if (expressionContext(target) != expr_contextType.Store) {
+            code_compiler.error("starred assignment target must have Store context", true, target);
+        }
+        if (children != null) {
+            for (expr child : children) {
+                validateStarTarget(child instanceof Starred ? ((Starred)child).getInternalValue()
+                        : child);
+            }
+        }
+    }
+
+    @Override
+    public Object visitTuple(Tuple node) throws Exception {
+        return visitUnpackingSequence(node.getInternalElts(), node.getInternalCtx());
+    }
+
+    @Override
+    public Object visitList(org.python.antlr.ast.List node) throws Exception {
+        return visitUnpackingSequence(node.getInternalElts(), node.getInternalCtx());
+    }
+
+    @Override
+    public Object visitSet(Set node) throws Exception {
+        return visitUnpackingSequence(node.getInternalElts(), expr_contextType.Load);
+    }
+
+    private void checkDictTarget(expr target) throws Exception {
+        if (target instanceof Dict) {
+            code_compiler.error("dict display cannot be an assignment or deletion target", true, target);
+        } else if (target instanceof Tuple) {
+            for (expr child : ((Tuple)target).getInternalElts()) {
+                checkDictTarget(child);
+            }
+        } else if (target instanceof org.python.antlr.ast.List) {
+            for (expr child : ((org.python.antlr.ast.List)target).getInternalElts()) {
+                checkDictTarget(child);
+            }
+        } else if (target instanceof Starred) {
+            checkDictTarget(((Starred)target).getInternalValue());
+        }
+    }
+
+    @Override
+    public Object visitAssign(Assign node) throws Exception {
+        for (expr target : node.getInternalTargets()) {
+            checkDictTarget(target);
+        }
+        traverse(node);
+        return null;
+    }
+
+    @Override
+    public Object visitAugAssign(AugAssign node) throws Exception {
+        checkDictTarget(node.getInternalTarget());
+        traverse(node);
+        return null;
+    }
+
+    @Override
+    public Object visitDelete(Delete node) throws Exception {
+        for (expr target : node.getInternalTargets()) {
+            checkDictTarget(target);
+        }
+        traverse(node);
+        return null;
+    }
+
+    @Override
+    public Object visitFor(For node) throws Exception {
+        checkDictTarget(node.getInternalTarget());
+        traverse(node);
+        return null;
+    }
+
+    @Override
+    public Object visitDict(Dict node) throws Exception {
+        List<expr> keys = node.getInternalKeys();
+        List<expr> values = node.getInternalValues();
+        if (keys == null || values == null || keys.size() != values.size()) {
+            code_compiler.error("Dict keys and values must have the same length", true, node);
+        }
+        for (int i = 0; i < keys.size(); i++) {
+            expr key = keys.get(i);
+            expr value = values.get(i);
+            if (value == null) {
+                code_compiler.error("Dict value must not be null", true, node);
+            }
+            if (key != null) {
+                if (expressionContext(key) != expr_contextType.Load) {
+                    code_compiler.error("Dict key must have Load context", true, key);
+                }
+                visit(key);
+            }
+            if (expressionContext(value) != expr_contextType.Load) {
+                code_compiler.error("Dict value must have Load context", true, value);
+            }
+            visit(value);
+        }
+        return null;
+    }
+
+    @Override
     public Object visitJoinedStr(JoinedStr node) throws Exception {
         for (expr value : node.getInternalValues()) {
             if (!(value instanceof Str || value instanceof FormattedValue)) {
@@ -378,6 +555,9 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
 
     @Override
     public Object visitListComp(ListComp node) throws Exception {
+        for (comprehension generator : node.getInternalGenerators()) {
+            checkDictTarget(generator.getInternalTarget());
+        }
         String tmp = "_[" + node.getLineno() + "_" + node.getCol_offset()
                 + "]";
         cur.addBound(tmp);
@@ -441,6 +621,7 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         if (generators != null) {
             for (int i = 0; i < generators.size(); i++) {
                 if (generators.get(i) != null) {
+                    checkDictTarget(generators.get(i).getInternalTarget());
                     if (i == 0) {
                         visit(generators.get(i).getInternalTarget());
                         if (generators.get(i).getInternalIfs() != null) {
@@ -468,6 +649,7 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
 
     @Override
     public Object visitWith(With node) throws Exception {
+        checkDictTarget(node.getInternalOptional_vars());
         cur.max_with_count++;
         traverse(node);
 

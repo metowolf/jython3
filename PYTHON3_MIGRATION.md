@@ -2,9 +2,11 @@
 
 ## Status
 
-The goal is a complete Python 3 migration. That goal is **not complete**.
-This working tree implements native function-syntax, nonlocal-scope,
-exception-chaining, and f-string stages on the existing Jython 2.7 runtime.
+The native JVM migration target is **Python 3.15.2**, retaining Java
+interoperability. That goal is **not complete**. This working tree implements
+native function-syntax, nonlocal-scope, exception-chaining, f-string,
+extended iterable-unpacking, and mapping-display unpacking stages on the
+existing Jython 2.7 runtime.
 It is not Jython 3, is not a Python 3 compatibility mode, and does not make
 arbitrary Python 3 packages runnable.
 
@@ -193,13 +195,110 @@ strings cannot reuse the outer delimiter, and format-spec replacement nesting
 has a limited depth. Parenthesize lambdas inside fields. Error wording and AST
 source ranges are not a promise of exact CPython compatibility.
 
+## Implemented iterable unpacking
+
+Extended assignment unpacking (PEP 3132) and the list, tuple and set iterable
+display forms of PEP 448 now execute on the JVM, without the CPython backend.
+
+```python
+first, *middle, last = range(5)
+assert (first, middle, last) == (0, [1, 2, 3], 4)
+assert [first, *middle, last, *[5, 6]] == [0, 1, 2, 3, 4, 5, 6]
+assert (*middle,) == (1, 2, 3)
+assert {*middle, 2} == {1, 2, 3}
+```
+
+Each assignment sequence may contain one starred target; nested sequences may
+have their own stars. Captured values are always a fresh native list, including
+empty captures. Attribute/subscript targets, chain assignments, `for` and
+comprehension targets, and parenthesized `with ... as` targets use the same
+compiler path. Unpacking completes before stores at that sequence level;
+subsequent nested assignment failures retain earlier stores, as in Python 3.
+
+Displays allow multiple stars and consume each iterable before evaluating the
+next expression. Set elements are inserted during consumption, so a hash error
+stops further iteration. No global `list`, `tuple`, `set`, or `eval` lookup is
+used. Registered JVM locals preserve accumulators and unpacked values across
+`yield`, including suspension while evaluating an assignment receiver or index.
+Java collections, Java `Iterable` objects, and Java arrays remain usable, and
+Java object identity is preserved.
+
+`Starred(value, ctx)` has native AST, visitor, subtype, source-position and GC
+support. Scope analysis rejects misplaced stars, multiple stars at one target
+level, missing operands, invalid star contexts and invalid nested star targets,
+including manually built ASTs and unreachable branches. This is not a full
+validation or migration of every legacy AST node.
+
+Generalized multiple `*args`/`**kwargs` calls, starred class bases, and unpacking
+comprehensions are not implemented. Dictionary `**` displays are covered in
+the subsequent stage below. The existing single-star call syntax remains available.
+The runtime's legacy iteration protocol is unchanged: Python iterator classes
+still need `next`, not only `__next__`. Length-hint allocation optimizations and
+their observable callbacks are not matched to CPython. Existing string/bytes behavior, container
+representations and comprehension scope rules remain transitional.
+
+## Implemented mapping displays
+
+PEP 448 dictionary displays now accept any number of `**mapping` operands,
+interleaved with ordinary key/value entries, directly in the JVM compiler.
+
+```python
+defaults = {'host': 'localhost', 'port': 8000}
+overrides = {'port': 9000}
+config = {**defaults, 'debug': False, **overrides}
+assert config == {'host': 'localhost', 'port': 9000, 'debug': False}
+assert defaults['port'] == 8000
+```
+
+The result is a fresh native `dict`; values are shallow references and later
+entries override earlier equal keys. Keys need not be strings. Each mapping is
+merged before evaluating the next entry group. Consecutive literal key/value
+expressions are evaluated in source order before that group's dictionary is
+constructed and merged. The ordinary dictionary fast path remains unchanged.
+Typed JVM locals and saved expression arrays preserve both the accumulated
+mapping and partially evaluated key/value pairs across `yield`.
+
+Generic mappings use `keys()` followed by `__getitem__`, not iteration over
+pairs as accepted by `dict.update`. Key iterators are exhausted before fetching
+values; an exact key list remains live. Exceptions from key discovery, key
+iteration, item access and insertion stop later entry evaluation. Native dict
+subclasses use the dictionary fast path unless they override `__iter__`, in
+which case their mapping protocol is used. Java `Map` implementations and
+native namespace mappings remain supported without CPython.
+
+The existing `Dict(keys, values)` AST uses a `None` key slot for each `**` value,
+distinct from an expression evaluating to a Python `None` key. No new AST node
+or field is needed. Scope analysis validates equal list lengths, non-null
+values and expression contexts, including hand-built ASTs. Dictionary displays
+cannot be assignment/deletion targets, including in nested targets, loops,
+comprehensions, context managers and unreachable branches. Using a dictionary
+as the receiver of a subscript target remains valid.
+
+This stage does not migrate the dictionary object model: insertion order is
+**not guaranteed**, views remain based on the existing runtime, and hash/equality
+callback counts, hash reuse, large-literal allocation strategies and concurrent
+mutation behavior are not matched to CPython. Mapping key iterators retain the
+legacy iteration/length-hint boundaries stated above. Error wording is not an
+exact compatibility promise. Function-call/class-base unpacking and unpacking
+comprehensions remain outstanding.
+
+The mapping module adds 42 cases: 34 shared cases also pass on CPython 3.15.2,
+and 8 are JVM-specific. All 42 native cases and 24 selected Java cases (including
+6 new mapping cases) passed. The broader native Python regression reported
+**All 33 tests OK**, including dictionary, set and Java integration modules.
+The complete Java driver reported 34,848 cases with the one previously recorded
+indexer failure and no timeouts. See
+[the mapping validation report](Doc/native-mapping-validation.md) for commands,
+test-JAR prerequisites, and detailed results. These are not claims of full
+Python 3.15.2 compatibility.
+
 ## Build and test
 
 From the repository root, with a JDK and Apache Ant installed:
 
 ```sh
 ant jar copy-dev compile-test
-java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest
+java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest
 ```
 
 The classpath separator above is for Linux/macOS; use `;` on Windows. In the
@@ -218,10 +317,10 @@ Java test classes must be on the classpath for `test_exceptions_jy` as well.
 Run the related Python regression set with:
 
 ```sh
-java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy
+java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy
 ```
 
-The new modules contain 25 function, 16 nonlocal, 33 exception-chaining, and
+The earlier modules contain 25 function, 16 nonlocal, 33 exception-chaining, and
 40 f-string test cases. Shared cases were also run on CPython 3.11; three
 function tests, two exception tests and one f-string AST test are Jython-specific
 and are skipped there. Twelve Java tests cover call overloads, legacy
@@ -230,7 +329,7 @@ constructors/factories, GC traversal, native display and f-string compilation.
 Final f-string validation used a fresh `build/python3-fstrings-final` output
 directory with Java 17 and the project's Java 8 source/target settings. The
 interpreter and 138 Java test source files compiled successfully, all 12 selected
-Java tests passed, and the Python regression command above reported
+Java tests passed, and the then-current 25-module Python regression set reported
 **All 25 tests OK**, including all 114 new Python cases. The supplied Chinese
 `datetime`/`timedelta`/`time` example also ran with its f-strings unchanged,
 including `strptime`, date arithmetic, timestamps and the 1.5-second sleep.
@@ -242,6 +341,17 @@ exception injection, invalid causes, exception attributes, traceback handling,
 cycle-safe formatting, AST construction/round trips, and interactive input.
 Existing AST fixtures and closure-deletion expectations were updated for the new
 behavior rather than disabling those checks.
+
+The subsequent unpacking stage adds 42 Python cases (35 shared and 7 JVM-only)
+and 6 Java cases. A fresh Java 17 build in `build/native-unpacking/fresh` compiled
+911 interpreter sources and 139 Java test sources. All 42 unpacking cases and
+all 18 selected Java cases passed; the then-current regression command reported
+**All 26 tests OK**. The 35 shared cases also passed on CPython 3.15.2, with the
+7 JVM-specific cases skipped. The combination test covers 144 different
+before/after/input-length configurations within one case. These results are not
+a claim of full Python 3.15.2 compatibility. See
+[the native validation report](Doc/native-jvm-validation.md) for full Java
+regression results, reproduction commands and remaining boundaries.
 
 ## AST and bytecode details
 
@@ -259,6 +369,8 @@ The AST is transitional, not the CPython 3 AST:
 - `Nonlocal(names)` is a new statement node with visitor and Python subtype support.
 - `Raise` keeps `type`, `inst`, and `tback`, then adds `cause`; it is not the CPython 3 `Raise(exc, cause)` layout.
 - `JoinedStr(values)` and `FormattedValue(value, conversion, format_spec)` are new expression nodes with visitor, Python subtype and GC support. `conversion` is `-1` or the ordinal of `s`, `r`, or `a`; absent `format_spec` is Python `None`. Literal parts remain `Str`, not modern `Constant` nodes.
+- `Starred(value, ctx)` represents extended assignment and iterable display unpacking. It has visitor, Python subtype and GC support; calls retain their legacy separate `starargs`/`kwargs` fields.
+- `Dict(keys, values)` now uses a null key slot for each mapping display expansion; ordinary `None` keys remain expression nodes. List lengths must match and values cannot be null.
 - Old four-field function and three-field raise constructors remain available. Code relying on exact `_fields` tuples must handle the additions.
 
 Generated AST files are checked in, so normal builds do not need the old ASDL
@@ -283,20 +395,23 @@ Parameter slots are positional-only, positional-or-keyword, keyword-only,
 optional `*args`, then optional `**kwargs`. Old Java code factories remain
 available; a new overload carries the additional parameter counts.
 
-The compiled-module API version is now **42**: stage 40 introduced function
+The compiled-module API version is now **44**: stage 40 introduced function
 metadata and setters; stage 41 introduced closure deletion and exception-state
-helpers; stage 42 adds the f-string runtime helpers required by generated code.
+helpers; stage 42 added f-string runtime helpers; stage 43 added iterable
+unpacking helpers; stage 44 adds mapping-display merging helpers.
 This is a bytecode compatibility number, not a Python language version. Rebuild
 compiled-only modules and regenerate source-backed `$py.class` caches. Do not
 bypass API checks to exchange caches with an older runtime.
 
 ## Remaining migration work and boundaries
 
-A complete migration still requires a defined Python 3 target version and
-version-specific acceptance tests. Outstanding work includes:
+The target is Python 3.15.2 for both language and standard-library behavior;
+the native path must meet it without forwarding execution to CPython. Full
+version-specific acceptance tests remain to be established. Outstanding work
+includes:
 
-- `yield from`, extended unpacking, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, matrix multiplication, and Python 3.12 PEP 701 f-string extensions.
-- Pattern matching, exception groups, type parameters, and newer annotation semantics where required by the eventual target version.
+- `yield from`, generalized call/class-base unpacking, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, matrix multiplication, and Python 3.12 PEP 701 f-string extensions.
+- Pattern matching, exception groups, type parameters, deferred annotation semantics, and the other language/library changes through Python 3.15.2.
 - Removal or isolation of Python 2-only syntax such as tuple parameters, `print`/`exec` statements, backticks, and old exception forms.
 - Python 3 string/bytes, integer and division, iteration, import, class/metaclass, exception, and comprehension semantics.
 - A Python 3 standard library, packaging ecosystem support, and full language/library regression coverage.

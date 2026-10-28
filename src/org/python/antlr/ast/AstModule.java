@@ -75,6 +75,7 @@ public class AstModule implements ClassDictInit {
         dict.__setitem__("Str", Str.TYPE);
         dict.__setitem__("JoinedStr", JoinedStr.TYPE);
         dict.__setitem__("FormattedValue", FormattedValue.TYPE);
+        dict.__setitem__("Starred", Starred.TYPE);
         dict.__setitem__("Subscript", Subscript.TYPE);
         dict.__setitem__("Suite", Suite.TYPE);
         dict.__setitem__("TryExcept", TryExcept.TYPE);

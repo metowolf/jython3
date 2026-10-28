@@ -750,16 +750,16 @@ atom
 
 //listmaker: test ( list_for | (',' test)* [','] )
 listmaker
-    : test
+    : star_test
         (list_for
-        | (options {greedy=true;}:COMMA test)*
+        | (options {greedy=true;}:COMMA star_test)*
         ) (COMMA)?
     ;
 
 //testlist_gexp: test ( comp_for | (',' test)* [','] )
 testlist_gexp
-    : test
-        ( ((options {k=2;}: COMMA test)* (COMMA)?
+    : star_test
+        ( ((options {k=2;}: COMMA star_test)* (COMMA)?
           )
         | (comp_for
           )
@@ -805,10 +805,22 @@ sliceop
      )
     ;
 
-//exprlist: expr (',' expr)* [',']
+star_expr
+    : STAR expr
+    ;
+
+star_test
+    : star_expr | test
+    ;
+
+star_or_expr
+    : star_expr | expr
+    ;
+
+//exprlist: (expr | star_expr) (',' (expr | star_expr))* [',']
 exprlist
-    : (expr COMMA) => expr (options {k=2;}: COMMA expr)* (COMMA)?
-    | expr
+    : (star_or_expr COMMA) => star_or_expr (options {k=2;}: COMMA star_or_expr)* (COMMA)?
+    | star_or_expr
     ;
 
 //not in CPython's Grammar file
@@ -819,25 +831,31 @@ del_list
 
 //testlist: test (',' test)* [',']
 testlist
-    : (test COMMA)
-   => test (options {k=2;}: COMMA test)* (COMMA)?
-    | test
+    : (star_test COMMA)
+   => star_test (options {k=2;}: COMMA star_test)* (COMMA)?
+    | star_test
     ;
 
 //dictorsetmaker: ( (test ':' test (comp_for | (',' test ':' test)* [','])) |
 //                  (test (comp_for | (',' test)* [','])) )
 dictorsetmaker
-    : test
+    : DOUBLESTAR expr (options {k=2;}: COMMA dict_item)* COMMA?
+    | star_test
          (
              (COLON test
                ( comp_for
-               | (options {k=2;}:COMMA test COLON test)*
+               | (options {k=2;}: COMMA dict_item)*
                )
-             |(COMMA test)*
+             |(COMMA star_test)*
              )
              (COMMA)?
          | comp_for
          )
+    ;
+
+dict_item
+    : DOUBLESTAR expr
+    | test COLON test
     ;
 
 //classdef: 'class' NAME ['(' [testlist] ')'] ':' suite

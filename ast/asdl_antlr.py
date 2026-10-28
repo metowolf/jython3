@@ -731,6 +731,23 @@ def main(outdir, grammar="Python.asdl"):
     c.visit(mod)
 
 indexer_support = {
+"Starred": """
+    @Override
+    public int traverse(Visitproc visit, Object arg) {
+        int result = super.traverse(visit, arg);
+        if (result != 0) return result;
+        if (value != null) {
+            result = visit.visit(value, arg);
+            if (result != 0) return result;
+        }
+        return __dict__ == null ? 0 : visit.visit(__dict__, arg);
+    }
+
+    @Override
+    public boolean refersDirectlyTo(PyObject ob) {
+        return ob != null && (ob == value || ob == __dict__ || super.refersDirectlyTo(ob));
+    }
+""",
 "JoinedStr": """
     @Override
     public int traverse(Visitproc visit, Object arg) {

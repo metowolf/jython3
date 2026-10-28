@@ -60,6 +60,7 @@ import org.python.antlr.ast.Set;
 import org.python.antlr.ast.SetComp;
 import org.python.antlr.ast.Slice;
 import org.python.antlr.ast.Str;
+import org.python.antlr.ast.Starred;
 import org.python.antlr.ast.Subscript;
 import org.python.antlr.ast.Suite;
 import org.python.antlr.ast.TryExcept;
@@ -101,6 +102,7 @@ import org.python.core.PyString;
 import org.python.core.PyTuple;
 import org.python.core.PyUnicode;
 import org.python.core.ThreadState;
+import org.python.core.UnpackingSupport;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -2170,22 +2172,35 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     }
 
     public Object seqSet(java.util.List<expr> nodes) throws Exception {
+        int starred = -1;
+        for (int i = 0; i < nodes.size(); i++) {
+            if (nodes.get(i) instanceof Starred) {
+                starred = i; // ScopesCompiler has already validated uniqueness.
+            }
+        }
         code.aload(temporary);
-        code.iconst(nodes.size());
-        code.invokestatic(p(Py.class), "unpackSequence",
-                sig(PyObject[].class, PyObject.class, Integer.TYPE));
+        if (starred < 0) {
+            code.iconst(nodes.size());
+            code.invokestatic(p(Py.class), "unpackSequence",
+                    sig(PyObject[].class, PyObject.class, Integer.TYPE));
+        } else {
+            code.iconst(starred);
+            code.iconst(nodes.size() - starred - 1);
+            code.invokestatic(p(UnpackingSupport.class), "unpack",
+                    sig(PyObject[].class, PyObject.class, Integer.TYPE, Integer.TYPE));
+        }
 
-        int tmp = code.getLocal("[org/python/core/PyObject");
+        int tmp = code.getLocal(ci(PyObject[].class));
         code.astore(tmp);
-
         for (int i = 0; i < nodes.size(); i++) {
             code.aload(tmp);
             code.iconst(i);
             code.aaload();
-            set(nodes.get(i));
+            expr target = nodes.get(i);
+            set(target instanceof Starred ? ((Starred)target).getInternalValue() : target);
         }
-        code.freeLocal(tmp);
-
+        // A tuple's array may be borrowed by unpackSequence: release, do not clear it.
+        freeArrayRef(tmp);
         return null;
     }
 
@@ -2194,6 +2209,59 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
             visit(e);
         }
         return null;
+    }
+
+    private boolean hasStarred(java.util.List<expr> elements) {
+        for (expr element : elements) {
+            if (element instanceof Starred) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Object unpackDisplay(java.util.List<expr> elements, Class<?> type) throws Exception {
+        Class<?> builderType = type == PySet.class ? PySet.class : PyList.class;
+        code.new_(p(builderType));
+        code.dup();
+        code.invokespecial(p(builderType), "<init>", sig(Void.TYPE));
+        int builder = code.getLocal(p(builderType));
+        code.astore(builder);
+        for (expr element : elements) {
+            boolean starred = element instanceof Starred;
+            // Keep the accumulator in a typed local, not on the operand stack:
+            // evaluating an element may yield and resume this JVM frame.
+            visit(starred ? ((Starred)element).getInternalValue() : element);
+            code.aload(builder);
+            code.swap();
+            if (builderType == PySet.class) {
+                code.invokestatic(p(UnpackingSupport.class), starred ? "extendSet" : "addSet",
+                        sig(Void.TYPE, PySet.class, PyObject.class));
+            } else if (starred) {
+                code.invokestatic(p(UnpackingSupport.class), "extendList",
+                        sig(Void.TYPE, PyList.class, PyObject.class));
+            } else {
+                code.invokevirtual(p(PyList.class), "append", sig(Void.TYPE, PyObject.class));
+            }
+        }
+        if (type == PyTuple.class) {
+            code.new_(p(PyTuple.class));
+            code.dup();
+            code.aload(builder);
+            code.invokevirtual(p(PyList.class), "getArray", sig(PyObject[].class));
+            code.invokespecial(p(PyTuple.class), "<init>", sig(Void.TYPE, PyObject[].class));
+        } else {
+            code.aload(builder);
+        }
+        code.aconst_null();
+        code.astore(builder);
+        code.freeLocal(builder);
+        return null;
+    }
+
+    @Override
+    public Object visitStarred(Starred node) throws Exception {
+        throw new ParseException("starred expression is not allowed here", node);
     }
 
     @Override
@@ -2205,6 +2273,9 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
             return seqDel(node.getInternalElts());
         }
 
+        if (hasStarred(node.getInternalElts())) {
+            return unpackDisplay(node.getInternalElts(), PyTuple.class);
+        }
         if (my_scope.generator) {
             int content = makeArray(node.getInternalElts());
             code.new_(p(PyTuple.class));
@@ -2230,6 +2301,9 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
             return seqDel(node.getInternalElts());
         }
 
+        if (hasStarred(node.getInternalElts())) {
+            return unpackDisplay(node.getInternalElts(), PyList.class);
+        }
         if (my_scope.generator) {
             int content = makeArray(node.getInternalElts());
             code.new_(p(PyList.class));
@@ -2316,8 +2390,51 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         visit(new Delete(n, targets));
     }
 
+    private Object unpackDict(Dict node) throws Exception {
+        code.new_(p(PyDictionary.class));
+        code.dup();
+        code.invokespecial(p(PyDictionary.class), "<init>", sig(Void.TYPE));
+        int builder = code.getLocal(p(PyDictionary.class));
+        code.astore(builder);
+        int i = 0;
+        while (i < node.getInternalKeys().size()) {
+            if (node.getInternalKeys().get(i) == null) {
+                visit(node.getInternalValues().get(i++));
+            } else {
+                // Evaluate a consecutive literal group before constructing its dict,
+                // then merge it before the next ** expression. Registered locals in
+                // makeArray also preserve partially evaluated key/value pairs at yield.
+                java.util.List<PythonTree> pairs = new ArrayList<PythonTree>();
+                do {
+                    pairs.add(node.getInternalKeys().get(i));
+                    pairs.add(node.getInternalValues().get(i++));
+                } while (i < node.getInternalKeys().size()
+                        && node.getInternalKeys().get(i) != null);
+                int content = makeArray(pairs);
+                code.new_(p(PyDictionary.class));
+                code.dup();
+                code.aload(content);
+                code.invokespecial(p(PyDictionary.class), "<init>", sig(Void.TYPE, PyObject[].class));
+                freeArray(content);
+            }
+            // Never leave the accumulator on the stack across evaluation that may yield.
+            code.aload(builder);
+            code.swap();
+            code.invokestatic(p(UnpackingSupport.class), "mergeMapping",
+                    sig(Void.TYPE, PyDictionary.class, PyObject.class));
+        }
+        code.aload(builder);
+        code.aconst_null();
+        code.astore(builder);
+        code.freeLocal(builder);
+        return null;
+    }
+
     @Override
     public Object visitDict(Dict node) throws Exception {
+        if (node.getInternalKeys().contains(null)) {
+            return unpackDict(node);
+        }
         java.util.List<PythonTree> elts = new ArrayList<PythonTree>();
         for (int i = 0; i < node.getInternalKeys().size(); i++) {
             elts.add(node.getInternalKeys().get(i));
@@ -2342,6 +2459,9 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
 
     @Override
     public Object visitSet(Set node) throws Exception {
+        if (hasStarred(node.getInternalElts())) {
+            return unpackDisplay(node.getInternalElts(), PySet.class);
+        }
         if (my_scope.generator) {
             int content = makeArray(node.getInternalElts());
             code.new_(p(PySet.class));

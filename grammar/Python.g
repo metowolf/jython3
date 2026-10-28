@@ -137,6 +137,7 @@ import org.python.antlr.ast.Set;
 import org.python.antlr.ast.SetComp;
 import org.python.antlr.ast.Slice;
 import org.python.antlr.ast.Str;
+import org.python.antlr.ast.Starred;
 import org.python.antlr.ast.Subscript;
 import org.python.antlr.ast.TryExcept;
 import org.python.antlr.ast.TryFinally;
@@ -1833,14 +1834,14 @@ listmaker[Token lbrack]
 @after {
    $listmaker.tree = etype;
 }
-    : t+=test[$expr::ctype]
+    : t+=star_test[$expr::ctype]
         (list_for[gens]
          {
              Collections.reverse(gens);
              List<comprehension> c = gens;
              etype = new ListComp($listmaker.start, actions.castExpr($t.get(0)), c);
          }
-        | (options {greedy=true;}:COMMA t+=test[$expr::ctype])*
+        | (options {greedy=true;}:COMMA t+=star_test[$expr::ctype])*
            {
                etype = new org.python.antlr.ast.List($lbrack, actions.castExprs($t), $expr::ctype);
            }
@@ -1858,13 +1859,13 @@ testlist_gexp
         $testlist_gexp.tree = etype;
     }
 }
-    : t+=test[$expr::ctype]
-        ( (options {k=2;}: c1=COMMA t+=test[$expr::ctype])* (c2=COMMA)?
+    : t+=star_test[$expr::ctype]
+        ( (options {k=2;}: c1=COMMA t+=star_test[$expr::ctype])* (c2=COMMA)?
          { $c1 != null || $c2 != null }? 
            {
                etype = new Tuple($testlist_gexp.start, actions.castExprs($t), $expr::ctype);
            }
-        | -> test
+        | -> star_test
         | (comp_for[gens]
            {
                Collections.reverse(gens);
@@ -1989,16 +1990,32 @@ sliceop
      )
     ;
 
-//exprlist: expr (',' expr)* [',']
+// A star's operand is expr, not test: comparisons/lambdas need parentheses.
+star_expr[expr_contextType ctype]
+@after { $star_expr.tree = new Starred($star_expr.start, actions.castExpr($operand.tree), ctype); }
+    : STAR operand=expr[ctype]
+    ;
+
+star_test[expr_contextType ctype]
+    : star_expr[ctype] -> star_expr
+    | test[ctype] -> test
+    ;
+
+star_or_expr[expr_contextType ctype]
+    : star_expr[ctype] -> star_expr
+    | expr[ctype] -> expr
+    ;
+
+//exprlist: (expr | star_expr) (',' (expr | star_expr))* [',']
 exprlist
     [expr_contextType ctype] returns [expr etype]
-    : (expr[null] COMMA) => e+=expr[ctype] (options {k=2;}: COMMA e+=expr[ctype])* (COMMA)?
+    : (star_or_expr[null] COMMA) => e+=star_or_expr[ctype] (options {k=2;}: COMMA e+=star_or_expr[ctype])* (COMMA)?
        {
            $etype = new Tuple($exprlist.start, actions.castExprs($e), ctype);
        }
-    | expr[ctype]
+    | star_or_expr[ctype]
       {
-        $etype = actions.castExpr($expr.tree);
+        $etype = actions.castExpr($star_or_expr.tree);
       }
     ;
 
@@ -2023,19 +2040,20 @@ testlist[expr_contextType ctype]
         $testlist.tree = etype;
     }
 }
-    : (test[null] COMMA)
-   => t+=test[ctype] (options {k=2;}: COMMA t+=test[ctype])* (COMMA)?
+    : (star_test[null] COMMA)
+   => t+=star_test[ctype] (options {k=2;}: COMMA t+=star_test[ctype])* (COMMA)?
       {
           etype = new Tuple($testlist.start, actions.castExprs($t), ctype);
       }
-    | test[ctype]
+    | star_test[ctype]
     ;
 
-//dictorsetmaker: ( (test ':' test (comp_for | (',' test ':' test)* [','])) |
-//                  (test (comp_for | (',' test)* [','])) )
+// Dict uses a null key for each **mapping value, as in the Python 3 AST.
 dictorsetmaker[Token lcurly]
 @init {
     List gens = new ArrayList();
+    List<expr> dictKeys = new ArrayList<expr>();
+    List<expr> dictValues = new ArrayList<expr>();
     expr etype = null;
 }
 @after {
@@ -2043,7 +2061,16 @@ dictorsetmaker[Token lcurly]
         $dictorsetmaker.tree = etype;
     }
 }
-    : k+=test[expr_contextType.Load]
+    : DOUBLESTAR mapping=expr[expr_contextType.Load]
+      {
+          dictKeys.add(null);
+          dictValues.add(actions.castExpr($mapping.tree));
+      }
+      (options {k=2;}: COMMA dict_item[dictKeys, dictValues])* COMMA?
+      {
+          etype = new Dict($lcurly, dictKeys, dictValues);
+      }
+    | k+=star_test[expr_contextType.Load]
          (
              (COLON v+=test[expr_contextType.Load]
                ( comp_for[gens]
@@ -2052,12 +2079,16 @@ dictorsetmaker[Token lcurly]
                      List<comprehension> c = gens;
                      etype = new DictComp($dictorsetmaker.start, actions.castExpr($k.get(0)), actions.castExpr($v.get(0)), c);
                  }
-               | (options {k=2;}:COMMA k+=test[expr_contextType.Load] COLON v+=test[expr_contextType.Load])*
+               | {
+                     dictKeys.add(actions.castExpr($k.get(0)));
+                     dictValues.add(actions.castExpr($v.get(0)));
+                 }
+                 (options {k=2;}: COMMA dict_item[dictKeys, dictValues])*
                  {
-                     etype = new Dict($lcurly, actions.castExprs($k), actions.castExprs($v));
+                     etype = new Dict($lcurly, dictKeys, dictValues);
                  }
                )
-             |(COMMA k+=test[expr_contextType.Load])*
+             |(COMMA k+=star_test[expr_contextType.Load])*
               {
                   etype = new Set($lcurly, actions.castExprs($k));
               }
@@ -2074,6 +2105,20 @@ dictorsetmaker[Token lcurly]
                etype = new SetComp($lcurly, actions.castExpr($k.get(0)), c);
            }
          )
+    ;
+
+// The ** operand is expr: conditionals and lambdas must be parenthesized.
+dict_item[List<expr> keys, List<expr> values]
+    : DOUBLESTAR mapping=expr[expr_contextType.Load]
+      {
+          keys.add(null);
+          values.add(actions.castExpr($mapping.tree));
+      }
+    | key=test[expr_contextType.Load] COLON value=test[expr_contextType.Load]
+      {
+          keys.add(actions.castExpr($key.tree));
+          values.add(actions.castExpr($value.tree));
+      }
     ;
 
 //classdef: 'class' NAME ['(' [testlist] ')'] ':' suite

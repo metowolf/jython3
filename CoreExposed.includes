@@ -183,6 +183,7 @@ org/python/antlr/ast/Slice.class
 org/python/antlr/ast/Str.class
 org/python/antlr/ast/JoinedStr.class
 org/python/antlr/ast/FormattedValue.class
+org/python/antlr/ast/Starred.class
 org/python/antlr/ast/Subscript.class
 org/python/antlr/ast/Suite.class
 org/python/antlr/ast/TryExcept.class

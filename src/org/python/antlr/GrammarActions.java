@@ -13,6 +13,7 @@ import org.python.antlr.ast.BinOp;
 import org.python.antlr.ast.BoolOp;
 import org.python.antlr.ast.Call;
 import org.python.antlr.ast.Context;
+import org.python.antlr.ast.Dict;
 import org.python.antlr.ast.DictComp;
 import org.python.antlr.ast.ExtSlice;
 import org.python.antlr.ast.For;
@@ -179,8 +180,8 @@ public class GrammarActions {
                 Object o = exprs.get(i);
                 if (o instanceof expr) {
                     result.add((expr)o);
-                } else if (o instanceof PythonParser.test_return) {
-                    result.add((expr)((PythonParser.test_return)o).tree);
+                } else if (o instanceof org.antlr.runtime.ParserRuleReturnScope) {
+                    result.add(castExpr(((org.antlr.runtime.ParserRuleReturnScope)o).getTree()));
                 }
             }
         }
@@ -672,6 +673,8 @@ public class GrammarActions {
             errorHandler.error("can't assign to set comprehension", e);
         } else if (e instanceof DictComp) {
             errorHandler.error("can't assign to dict comprehension", e);
+        } else if (e instanceof Dict) {
+            errorHandler.error("can't assign to dict display", e);
         }
      }
 
@@ -681,25 +684,39 @@ public class GrammarActions {
             errorHandler.error("assignment to tuple illegal for augmented assignment", e);
         } else if (e instanceof org.python.antlr.ast.List) {
             errorHandler.error("assignment to list illegal for augmented assignment", e);
+        } else if (e instanceof org.python.antlr.ast.Starred) {
+            errorHandler.error("starred expression is illegal for augmented assignment", e);
         }
     }
 
     void checkAssign(expr e) {
         checkGenericAssign(e);
-        if (e instanceof Tuple) {
+        if (e instanceof org.python.antlr.ast.Starred) {
+            errorHandler.error("starred assignment target must be in a list or tuple", e);
+        } else if (e instanceof Tuple) {
             //XXX: performance problem?  Any way to do this better?
             List<expr> elts = ((Tuple)e).getInternalElts();
             if (elts.size() == 0) {
                 errorHandler.error("can't assign to ()", e);
             }
-            for (int i=0;i<elts.size();i++) {
-                checkAssign(elts.get(i));
-            }
+            checkAssignElements(elts);
         } else if (e instanceof org.python.antlr.ast.List) {
-            //XXX: performance problem?  Any way to do this better?
             List<expr> elts = ((org.python.antlr.ast.List)e).getInternalElts();
-            for (int i=0;i<elts.size();i++) {
-                checkAssign(elts.get(i));
+            checkAssignElements(elts);
+        }
+    }
+
+    private void checkAssignElements(List<expr> elts) {
+        boolean starred = false;
+        for (expr elt : elts) {
+            if (elt instanceof org.python.antlr.ast.Starred) {
+                if (starred) {
+                    errorHandler.error("multiple starred expressions in assignment", elt);
+                }
+                starred = true;
+                checkAssign(((org.python.antlr.ast.Starred)elt).getInternalValue());
+            } else {
+                checkAssign(elt);
             }
         }
     }
@@ -713,7 +730,11 @@ public class GrammarActions {
     }
 
     void checkDelete(expr e) {
-        if (e instanceof Call) {
+        if (e instanceof org.python.antlr.ast.Starred) {
+            errorHandler.error("cannot delete starred expression", e);
+        } else if (e instanceof Dict) {
+            errorHandler.error("can't delete dict display", e);
+        } else if (e instanceof Call) {
             errorHandler.error("can't delete function call", e);
         } else if (e instanceof Num) {
             errorHandler.error("can't delete number", e);

@@ -111,6 +111,7 @@ ast_Slice.derived:org.python.antlr.ast.SliceDerived
 ast_Str.derived:org.python.antlr.ast.StrDerived
 ast_JoinedStr.derived:org.python.antlr.ast.JoinedStrDerived
 ast_FormattedValue.derived:org.python.antlr.ast.FormattedValueDerived
+ast_Starred.derived:org.python.antlr.ast.StarredDerived
 ast_Subscript.derived:org.python.antlr.ast.SubscriptDerived
 ast_Suite.derived:org.python.antlr.ast.SuiteDerived
 ast_TryExcept.derived:org.python.antlr.ast.TryExceptDerived

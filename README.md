@@ -5,12 +5,15 @@
 
 This is the development repository of Jython,
 the implementation of Python in Java.
-The native JVM runtime currently targets Python 2.7. This checkout also offers
-an optional CPython 3.15.2 process backend, described below.
+The native JVM runtime is still based on Python 2.7, with Python 3.15.2 as its
+migration target. This checkout also offers an optional CPython 3.15.2 process
+backend, described below.
 
 This working tree contains an experimental, native Python 3 migration:
 function annotations, keyword-only and positional-only parameters, `nonlocal`,
-exception chaining (`raise ... from ...`), and PEP 498 f-strings with debug fields.
+exception chaining (`raise ... from ...`), PEP 498 f-strings with debug fields,
+extended assignment unpacking, iterable unpacking in list/tuple/set displays,
+and dictionary `**mapping` displays.
 It is **not a complete Python 3 implementation**; the runtime and standard library
 are still based on Python 2.7. Python 3.12's PEP 701 f-string extensions are not
 implemented. Some Python 2 behaviors deliberately change, including closure-cell
