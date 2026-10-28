@@ -103,6 +103,7 @@ import org.python.core.PyTuple;
 import org.python.core.PyUnicode;
 import org.python.core.ThreadState;
 import org.python.core.UnpackingSupport;
+import org.python.core.CallUnpackingSupport;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
@@ -1892,8 +1893,86 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         return null;
     }
 
+    private boolean hasCallUnpacking(Call node) {
+        if (hasStarred(node.getInternalArgs())) {
+            return true;
+        }
+        for (keyword key : node.getInternalKeywords()) {
+            if (key.getInternalArg() == null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Object unpackCall(Call node) throws Exception {
+        visit(node.getInternalFunc());
+        int function = storeTop();
+        code.new_(p(CallUnpackingSupport.class));
+        code.dup();
+        code.aload(function);
+        code.invokespecial(p(CallUnpackingSupport.class), "<init>", sig(Void.TYPE, PyObject.class));
+        code.aconst_null();
+        code.astore(function);
+        code.freeLocal(function);
+        int builder = code.getLocal(p(CallUnpackingSupport.class));
+        code.astore(builder);
+        // Positional expressions (including stars written after named arguments)
+        // precede keyword expressions, as in Python 3's split Call AST.
+        boolean soleStar = node.getInternalArgs().size() == 1
+                && node.getInternalArgs().get(0) instanceof Starred;
+        for (expr argument : node.getInternalArgs()) {
+            boolean starred = argument instanceof Starred;
+            visit(starred ? ((Starred)argument).getInternalValue() : argument);
+            code.aload(builder);
+            code.swap();
+            code.invokevirtual(p(CallUnpackingSupport.class),
+                    starred ? (soleStar ? "defer" : "extend") : "add",
+                    sig(Void.TYPE, PyObject.class));
+        }
+        int i = 0;
+        while (i < node.getInternalKeywords().size()) {
+            keyword key = node.getInternalKeywords().get(i);
+            if (key.getInternalArg() == null) {
+                visit(key.getInternalValue());
+                code.aload(builder);
+                code.swap();
+                code.invokevirtual(p(CallUnpackingSupport.class), "merge", sig(Void.TYPE, PyObject.class));
+                i++;
+            } else {
+                java.util.List<expr> values = new ArrayList<expr>();
+                java.util.List<String> names = new ArrayList<String>();
+                do {
+                    key = node.getInternalKeywords().get(i++);
+                    names.add(key.getInternalArg());
+                    values.add(key.getInternalValue());
+                } while (i < node.getInternalKeywords().size()
+                        && node.getInternalKeywords().get(i).getInternalArg() != null);
+                int array = makeArray(values);
+                int strings = makeStrings(code, names);
+                code.aload(builder);
+                code.aload(array);
+                code.aload(strings);
+                code.invokevirtual(p(CallUnpackingSupport.class), "addKeywords",
+                        sig(Void.TYPE, PyObject[].class, String[].class));
+                freeArray(array);
+                freeArrayRef(strings);
+            }
+        }
+        code.aload(builder);
+        loadThreadState();
+        code.invokevirtual(p(CallUnpackingSupport.class), "call", sig(PyObject.class, ThreadState.class));
+        code.aconst_null();
+        code.astore(builder);
+        code.freeLocal(builder);
+        return null;
+    }
+
     @Override
     public Object visitCall(Call node) throws Exception {
+        if (hasCallUnpacking(node)) {
+            return unpackCall(node);
+        }
         java.util.List<String> keys = new ArrayList<String>();
         java.util.List<expr> values = new ArrayList<expr>();
         for (int i = 0; i < node.getInternalArgs().size(); i++) {

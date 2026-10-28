@@ -13,7 +13,9 @@ This working tree contains an experimental, native Python 3 migration:
 function annotations, keyword-only and positional-only parameters, `nonlocal`,
 exception chaining (`raise ... from ...`), PEP 498 f-strings with debug fields,
 extended assignment unpacking, iterable unpacking in list/tuple/set displays,
-and dictionary `**mapping` displays.
+dictionary `**mapping` displays, and generalized multiple `*args`/`**kwargs`
+function calls. Call expansion preserves Java interoperation and rejects duplicate
+keywords rather than overwriting them.
 It is **not a complete Python 3 implementation**; the runtime and standard library
 are still based on Python 2.7. Python 3.12's PEP 701 f-string extensions are not
 implemented. Some Python 2 behaviors deliberately change, including closure-cell

@@ -2142,85 +2142,70 @@ classdef
       }
     ;
 
-//arglist: (argument ',')* (argument [',']
-//                         |'*' test (',' argument)* [',' '**' test]
-//                         |'**' test)
+// Calls use Starred in args and keyword(null, value) for mapping expansion.
+// Legacy starargs/kwargs fields remain available to Java and hand-built ASTs.
 arglist
     returns [List args, List keywords, expr starargs, expr kwargs]
 @init {
     List arguments = new ArrayList();
-    List kws = new ArrayList();
+    List<keyword> kws = new ArrayList<keyword>();
     List gens = new ArrayList();
 }
-    : argument[arguments, kws, gens, true, false] (COMMA argument[arguments, kws, gens, false, false])*
-          (COMMA
-              ( STAR s=test[expr_contextType.Load] (COMMA argument[arguments, kws, gens, false, true])* (COMMA DOUBLESTAR k=test[expr_contextType.Load])?
-              | DOUBLESTAR k=test[expr_contextType.Load]
-              )?
-          )?
+    : argument[arguments, kws, gens]
+      (options {k=2;}: COMMA argument[arguments, kws, gens])* trailing=COMMA?
       {
-          if (arguments.size() > 1 && gens.size() > 0) {
+          if (!gens.isEmpty() && (arguments.size() != 1 || !kws.isEmpty() || $trailing != null)) {
               actions.errorGenExpNotSoleArg(new PythonTree($arglist.start));
           }
-          $args=arguments;
-          $keywords=kws;
-          $starargs=actions.castExpr($s.tree);
-          $kwargs=actions.castExpr($k.tree);
-      }
-    | STAR s=test[expr_contextType.Load] (COMMA argument[arguments, kws, gens, false, true])* (COMMA DOUBLESTAR k=test[expr_contextType.Load])?
-      {
-          $starargs=actions.castExpr($s.tree);
-          $keywords=kws;
-          $kwargs=actions.castExpr($k.tree);
-      }
-    | DOUBLESTAR k=test[expr_contextType.Load]
-      {
-          $kwargs=actions.castExpr($k.tree);
+          $args = arguments;
+          $keywords = kws;
       }
     ;
 
-//argument: test [comp_for] | test '=' test  # Really [keyword '='] test
-argument
-    [List arguments, List kws, List gens, boolean first, boolean afterStar] returns [boolean genarg]
-    : t1=test[expr_contextType.Load]
-        ((ASSIGN t2=test[expr_contextType.Load])
-          {
-              expr newkey = actions.castExpr($t1.tree);
-              //Loop through all current keys and fail on duplicate.
-              for(Object o: $kws) {
-                  List list = (List)o;
-                  Object oldkey = list.get(0);
-                  if (oldkey instanceof Name && newkey instanceof Name) {
-                      if (((Name)oldkey).getId().equals(((Name)newkey).getId())) {
-                          errorHandler.error("keyword arguments repeated", $t1.tree, true);
-                      }
-                  }
+argument[List arguments, List<keyword> kws, List gens]
+    : STAR operand=test[expr_contextType.Load]
+      {
+          for (keyword key : kws) {
+              if (key.getInternalArg() == null) {
+                  errorHandler.error("iterable unpacking follows keyword unpacking", $operand.tree, true);
               }
-              List<expr> exprs = new ArrayList<expr>();
-              exprs.add(newkey);
-              exprs.add(actions.castExpr($t2.tree));
-              $kws.add(exprs);
           }
-        | comp_for[$gens]
-          {
-              if (!first) {
-                  actions.errorGenExpNotSoleArg($comp_for.tree);
-              }
-              $genarg = true;
-              Collections.reverse($gens);
-              List<comprehension> c = $gens;
-              arguments.add(new GeneratorExp($t1.start, actions.castExpr($t1.tree), c));
-          }
-        |
-          {
-              if (kws.size() > 0) {
-                  errorHandler.error("non-keyword arg after keyword arg", $t1.tree, true);
-              } else if (afterStar) {
-                  errorHandler.error("only named arguments may follow *expression", $t1.tree, true);
-              }
-              $arguments.add($t1.tree);
-          }
-        )
+          arguments.add(new Starred($STAR, actions.castExpr($operand.tree), expr_contextType.Load));
+      }
+    | DOUBLESTAR mapping=test[expr_contextType.Load]
+      {
+          kws.add(new keyword($DOUBLESTAR, null, actions.castExpr($mapping.tree)));
+      }
+    | t1=test[expr_contextType.Load]
+      ( ASSIGN t2=test[expr_contextType.Load]
+        {
+            expr key = actions.castExpr($t1.tree);
+            actions.checkAssign(key);
+            if (!(key instanceof Name)) {
+                errorHandler.error("keyword must be a name", $t1.tree, true);
+            } else {
+                String name = ((Name)key).getInternalId();
+                for (keyword old : kws) {
+                    if (name.equals(old.getInternalArg())) {
+                        errorHandler.error("keyword arguments repeated", $t1.tree, true);
+                    }
+                }
+                kws.add(new keyword(key, name, actions.castExpr($t2.tree)));
+            }
+        }
+      | comp_for[gens]
+        {
+            Collections.reverse(gens);
+            arguments.add(new GeneratorExp($t1.start, actions.castExpr($t1.tree), gens));
+        }
+      |
+        {
+            if (!kws.isEmpty()) {
+                errorHandler.error("non-keyword arg after keyword arg", $t1.tree, true);
+            }
+            arguments.add(actions.castExpr($t1.tree));
+        }
+      )
     ;
 
 //list_iter: list_for | list_if

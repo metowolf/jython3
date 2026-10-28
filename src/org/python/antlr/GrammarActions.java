@@ -381,6 +381,10 @@ public class GrammarActions {
         List<keyword> keywords = new ArrayList<keyword>();
         if (args != null) {
             for (Object o : args) {
+                if (o instanceof keyword) {
+                    keywords.add((keyword)o);
+                    continue;
+                }
                 List e = (List)o;
                 Object k = e.get(0);
                 Object v = e.get(1);

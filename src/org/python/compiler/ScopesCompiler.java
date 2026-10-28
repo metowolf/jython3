@@ -5,6 +5,7 @@ package org.python.compiler;
 import org.python.antlr.Visitor;
 import org.python.antlr.PythonTree;
 import org.python.antlr.ast.ClassDef;
+import org.python.antlr.ast.Call;
 import org.python.antlr.ast.Assign;
 import org.python.antlr.ast.AugAssign;
 import org.python.antlr.ast.Delete;
@@ -240,6 +241,53 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
                 cur.addBound(node.getInternalNames().get(i).getInternalName());
             }
         }
+        return null;
+    }
+
+    private void visitCallValue(expr value, PythonTree owner) throws Exception {
+        if (value == null || expressionContext(value) != expr_contextType.Load) {
+            code_compiler.error("call expression must have a value in Load context", true, owner);
+        }
+        visit(value);
+    }
+
+    @Override
+    public Object visitCall(Call node) throws Exception {
+        visitCallValue(node.getInternalFunc(), node);
+        boolean modern = false;
+        for (expr argument : node.getInternalArgs()) {
+            if (argument instanceof Starred) {
+                modern = true;
+                Starred star = (Starred)argument;
+                if (star.getInternalCtx() != expr_contextType.Load) {
+                    code_compiler.error("call star must have Load context", true, star);
+                }
+                visitCallValue(star.getInternalValue(), star);
+            } else {
+                visitCallValue(argument, node);
+            }
+        }
+        java.util.Set<String> names = new java.util.HashSet<String>();
+        for (keyword key : node.getInternalKeywords()) {
+            if (key == null) {
+                code_compiler.error("call keyword must not be null", true, node);
+            }
+            String name = key.getInternalArg();
+            if (name == null) {
+                modern = true;
+            } else if ("None".equals(name) || "True".equals(name) || "False".equals(name)
+                    || "__debug__".equals(name)) {
+                code_compiler.error("invalid explicit keyword name: " + name, true, key);
+            } else if (!names.add(name)) {
+                code_compiler.error("keyword arguments repeated", true, key);
+            }
+            visitCallValue(key.getInternalValue(), key);
+        }
+        if (modern && (node.getInternalStarargs() != null || node.getInternalKwargs() != null)) {
+            code_compiler.error("cannot mix modern call unpacking with legacy starargs/kwargs", true, node);
+        }
+        if (node.getInternalStarargs() != null) visitCallValue(node.getInternalStarargs(), node);
+        if (node.getInternalKwargs() != null) visitCallValue(node.getInternalKwargs(), node);
         return null;
     }
 

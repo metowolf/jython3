@@ -44,6 +44,7 @@ import org.python.antlr.ast.Repr;
 import org.python.antlr.ast.Return;
 import org.python.antlr.ast.Slice;
 import org.python.antlr.ast.Str;
+import org.python.antlr.ast.Starred;
 import org.python.antlr.ast.Subscript;
 import org.python.antlr.ast.TryExcept;
 import org.python.antlr.ast.TryFinally;
@@ -380,8 +381,15 @@ public class AstConverter extends Visitor {
 
     @Override
     public Object visitCall(Call n) throws Exception {
+        // NCall resolves argument references, not expansion arity or parameter binding.
+        // Keep every modern star operand in its argument list for resolution/visitors.
+        List<NNode> args = new ArrayList<NNode>();
+        for (expr argument : n.getInternalArgs()) {
+            args.add(convExpr(argument instanceof Starred
+                    ? ((Starred)argument).getInternalValue() : argument));
+        }
         return new NCall(convExpr(n.getInternalFunc()),
-                         convertListExpr(n.getInternalArgs()),
+                         args,
                          convertListKeyword(n.getInternalKeywords()),
                          convExpr(n.getInternalKwargs()),
                          convExpr(n.getInternalStarargs()),

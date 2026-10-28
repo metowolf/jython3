@@ -52,8 +52,9 @@ Here we add keyword arguments
     >>> f(1, 2, 3, x=4, y=5, *(6, 7), **UserDict(a=8, b=9))
     (1, 2, 3, 6, 7) {'a': 8, 'b': 9, 'x': 4, 'y': 5}
 
-Examples with invalid arguments (TypeErrors). We're also testing the function
-names in the exception messages.
+Examples with invalid arguments (TypeErrors). Mapping and binding errors retain
+function names. Iteration errors propagate directly, without masking a user
+__iter__ method's TypeError.
 
 Verify clearing of SF bug #733667
 
@@ -91,7 +92,7 @@ Verify clearing of SF bug #733667
     >>> g(*Nothing())
     Traceback (most recent call last):
       ...
-    TypeError: g() argument after * must be a sequence
+    TypeError: 'instance' object is not iterable
 
     >>> class Nothing:
     ...     def __len__(self): return 5
@@ -100,7 +101,7 @@ Verify clearing of SF bug #733667
     >>> g(*Nothing())
     Traceback (most recent call last):
       ...
-    TypeError: g() argument after * must be a sequence
+    TypeError: 'instance' object is not iterable
 
     >>> class Nothing:
     ...     def __len__(self): return 5
@@ -165,32 +166,32 @@ What about willful misconduct?
     >>> h(*h)
     Traceback (most recent call last):
       ...
-    TypeError: h() argument after * must be a sequence
+    TypeError: 'function' object is not iterable
 
     >>> dir(*h)
     Traceback (most recent call last):
       ...
-    TypeError: dir() argument after * must be a sequence
+    TypeError: 'function' object is not iterable
 
     >>> None(*h)
     Traceback (most recent call last):
       ...
-    TypeError: NoneType argument after * must be a sequence
+    TypeError: 'function' object is not iterable
 
     >>> h(**h)
     Traceback (most recent call last):
       ...
-    TypeError: h() argument after ** must be a mapping
+    TypeError: h() argument after ** must be a mapping, not function
 
     >>> dir(**h)
     Traceback (most recent call last):
       ...
-    TypeError: dir() argument after ** must be a mapping
+    TypeError: dir() argument after ** must be a mapping, not function
 
     >>> None(**h)
     Traceback (most recent call last):
       ...
-    TypeError: NoneType argument after ** must be a mapping
+    TypeError: NoneType object argument after ** must be a mapping, not function
 
     >>> dir(b=1, **{'b': 1})
     Traceback (most recent call last):

@@ -863,27 +863,15 @@ classdef
     : decorators? CLASS NAME (LPAREN testlist? RPAREN)? COLON suite
     ;
 
-//arglist: (argument ',')* (argument [',']
-//                         |'*' test (',' argument)* [',' '**' test]
-//                         |'**' test)
+// Generalized call unpacking, matching the full parser's argument forms.
 arglist
-    : argument (COMMA argument)*
-          (COMMA
-              ( STAR test (COMMA argument)* (COMMA DOUBLESTAR test)?
-              | DOUBLESTAR test
-              )?
-          )?
-    | STAR test (COMMA argument)* (COMMA DOUBLESTAR test)?
-    | DOUBLESTAR test
+    : argument (options {k=2;}: COMMA argument)* COMMA?
     ;
 
-//argument: test [comp_for] | test '=' test  # Really [keyword '='] test
 argument
-    : test
-        ((ASSIGN test)
-        | comp_for
-        |
-        )
+    : STAR test
+    | DOUBLESTAR test
+    | test (ASSIGN test | comp_for | )
     ;
 
 //list_iter: list_for | list_if

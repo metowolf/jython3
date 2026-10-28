@@ -5,8 +5,8 @@
 The native JVM migration target is **Python 3.15.2**, retaining Java
 interoperability. That goal is **not complete**. This working tree implements
 native function-syntax, nonlocal-scope, exception-chaining, f-string,
-extended iterable-unpacking, and mapping-display unpacking stages on the
-existing Jython 2.7 runtime.
+extended iterable-unpacking, mapping-display unpacking, and generalized
+call-unpacking stages on the existing Jython 2.7 runtime.
 It is not Jython 3, is not a Python 3 compatibility mode, and does not make
 arbitrary Python 3 packages runnable.
 
@@ -229,9 +229,9 @@ level, missing operands, invalid star contexts and invalid nested star targets,
 including manually built ASTs and unreachable branches. This is not a full
 validation or migration of every legacy AST node.
 
-Generalized multiple `*args`/`**kwargs` calls, starred class bases, and unpacking
-comprehensions are not implemented. Dictionary `**` displays are covered in
-the subsequent stage below. The existing single-star call syntax remains available.
+Starred class bases and unpacking comprehensions are not implemented.
+Dictionary `**` displays and generalized multiple `*args`/`**kwargs` calls are
+covered in the subsequent stages below.
 The runtime's legacy iteration protocol is unchanged: Python iterator classes
 still need `next`, not only `__next__`. Length-hint allocation optimizations and
 their observable callbacks are not matched to CPython. Existing string/bytes behavior, container
@@ -279,8 +279,8 @@ This stage does not migrate the dictionary object model: insertion order is
 callback counts, hash reuse, large-literal allocation strategies and concurrent
 mutation behavior are not matched to CPython. Mapping key iterators retain the
 legacy iteration/length-hint boundaries stated above. Error wording is not an
-exact compatibility promise. Function-call/class-base unpacking and unpacking
-comprehensions remain outstanding.
+exact compatibility promise. Class-base unpacking and unpacking comprehensions
+remain outstanding; function-call unpacking is covered below.
 
 The mapping module adds 42 cases: 34 shared cases also pass on CPython 3.15.2,
 and 8 are JVM-specific. All 42 native cases and 24 selected Java cases (including
@@ -292,13 +292,76 @@ indexer failure and no timeouts. See
 test-JAR prerequisites, and detailed results. These are not claims of full
 Python 3.15.2 compatibility.
 
+## Implemented call unpacking
+
+Generalized PEP 448 function calls execute directly on the JVM:
+
+```python
+def collect(*args, **kwargs):
+    return args, kwargs
+
+assert collect(0, *[1], 2, *[3], x=4, **{'y': 5}, z=6, **{'w': 7}) == (
+    (0, 1, 2, 3), {'x': 4, 'y': 5, 'z': 6, 'w': 7})
+```
+
+Multiple iterable and mapping operands may be interleaved with ordinary values
+in their respective argument groups. An ordinary positional value cannot follow a
+keyword argument, and iterable expansion cannot follow mapping expansion.
+Explicit keywords may follow a mapping expansion. Repeated explicit names are
+compile-time errors, including in unreachable hand-built ASTs. Runtime keyword
+collisions raise `TypeError`, unlike dictionary displays' last-value-wins rule.
+Final keyword names must be strings in the current native object model.
+
+The callable is evaluated first, then all positional expressions, including
+stars written after named arguments, then keyword expressions. Multiple-star
+calls consume each iterable before the next positional expression. If the only
+positional argument is a single star, its operand is evaluated early but consumed
+after keyword evaluation/merging, as observed on CPython 3.15.2. Consecutive named
+values are all evaluated before that group's collision checks. Mapping merges
+check duplicate and unhashable keys before fetching the corresponding value;
+non-string key rejection happens after all merges. User iterator exceptions
+propagate without replacing an internal `TypeError` with an argument error.
+
+Custom mappings use `keys()` and item lookup. Non-exact-list key iterables are
+consumed before fetching values; an exact list stays live. Native dictionary
+subclasses use the fast path unless they override `__iter__`. The accumulator
+uses the existing `PyObject.__call__(ThreadState, PyObject[], String[])` ABI;
+Java iterables, arrays, maps, overloaded methods and constructors remain usable.
+Typed JVM locals and GC traversal preserve intermediate state across `yield`,
+including nested calls and partially evaluated keyword groups. Ordinary calls
+without expansion keep their existing fast paths.
+
+The parser puts `Starred` entries in `Call.args` and `keyword(arg=None, value=...)`
+in `Call.keywords`. The legacy `Call.starargs` and `Call.kwargs` fields and Java
+constructors are retained. Pure legacy manually built calls still compile through
+the old path; mixing legacy fields with modern expansion entries is rejected.
+`Python.asdl` documents nullable keyword names without changing the Java layout.
+
+This does not implement ordered final `**kwargs` dictionaries (PEP 468), modern
+`str`/`bytes` separation, the modern iteration protocol, or exact CPython callback
+counts, length hints, hash caching, error messages and concurrent-mutation behavior.
+The AST remains transitional. The indexer's call conversion now preserves star
+operand references without a class-cast failure, but does not implement complete
+expansion-arity inference or migrate the entire alternate indexer AST.
+
+All 49 new native Python cases passed; 42 shared cases also passed on CPython
+3.15.2, with 7 JVM-specific cases skipped there. The final fresh build compiled
+912 production and 141 Java test sources. All 30 selected Java cases passed on
+standard and fresh builds, and the native regression reported **All 35 tests OK**.
+The complete Java driver reported 34,856 cases with one previously recorded
+indexer reference failure and no timeouts; the new standard-library indexing
+regression was fixed, with two added reference tests. See
+[call validation](Doc/native-call-validation.md) for commands, detailed results
+and the unresolved failure. These results do not establish full Python 3.15.2
+compatibility.
+
 ## Build and test
 
 From the repository root, with a JDK and Apache Ant installed:
 
 ```sh
-ant jar copy-dev compile-test
-java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest
+ant jar copy-dev compile-test jar-test
+java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest
 ```
 
 The classpath separator above is for Linux/macOS; use `;` on Windows. In the
@@ -306,18 +369,20 @@ current workspace, project-local Ant 1.10.15 jars are available under ignored
 `build/tools`:
 
 ```sh
-java -cp 'build/tools/*' org.apache.tools.ant.Main jar copy-dev compile-test
+java -cp 'build/tools/*' org.apache.tools.ant.Main jar copy-dev compile-test jar-test
 ```
 
-Those jars are not committed and are unnecessary when Ant is already installed.
-A fresh checkout does not contain them. If using `-Dbuild.dir=...`, replace
+Those Ant jars are not committed and are unnecessary when Ant is already installed.
+A fresh checkout does not contain them. The `jar-test` target supplies the separate
+`dist/jython-test.jar` needed by Java integration subprocesses.
+If using `-Dbuild.dir=...`, replace
 `build/testclasses` in the test classpath with that directory's `testclasses`.
 Java test classes must be on the classpath for `test_exceptions_jy` as well.
 
 Run the related Python regression set with:
 
 ```sh
-java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy
+java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration
 ```
 
 The earlier modules contain 25 function, 16 nonlocal, 33 exception-chaining, and
@@ -369,7 +434,8 @@ The AST is transitional, not the CPython 3 AST:
 - `Nonlocal(names)` is a new statement node with visitor and Python subtype support.
 - `Raise` keeps `type`, `inst`, and `tback`, then adds `cause`; it is not the CPython 3 `Raise(exc, cause)` layout.
 - `JoinedStr(values)` and `FormattedValue(value, conversion, format_spec)` are new expression nodes with visitor, Python subtype and GC support. `conversion` is `-1` or the ordinal of `s`, `r`, or `a`; absent `format_spec` is Python `None`. Literal parts remain `Str`, not modern `Constant` nodes.
-- `Starred(value, ctx)` represents extended assignment and iterable display unpacking. It has visitor, Python subtype and GC support; calls retain their legacy separate `starargs`/`kwargs` fields.
+- `Starred(value, ctx)` represents extended assignment, iterable display and call unpacking. It has visitor, Python subtype and GC support.
+- `Call.args` now contains stars and `Call.keywords` contains null-name mapping entries. Legacy `starargs`/`kwargs` fields and constructors remain available for pure legacy calls, but cannot be mixed with modern expansion entries.
 - `Dict(keys, values)` now uses a null key slot for each mapping display expansion; ordinary `None` keys remain expression nodes. List lengths must match and values cannot be null.
 - Old four-field function and three-field raise constructors remain available. Code relying on exact `_fields` tuples must handle the additions.
 
@@ -395,10 +461,11 @@ Parameter slots are positional-only, positional-or-keyword, keyword-only,
 optional `*args`, then optional `**kwargs`. Old Java code factories remain
 available; a new overload carries the additional parameter counts.
 
-The compiled-module API version is now **44**: stage 40 introduced function
+The compiled-module API version is now **45**: stage 40 introduced function
 metadata and setters; stage 41 introduced closure deletion and exception-state
 helpers; stage 42 added f-string runtime helpers; stage 43 added iterable
-unpacking helpers; stage 44 adds mapping-display merging helpers.
+unpacking helpers; stage 44 added mapping-display merging helpers; stage 45
+adds the generalized call accumulator and invocation helpers.
 This is a bytecode compatibility number, not a Python language version. Rebuild
 compiled-only modules and regenerate source-backed `$py.class` caches. Do not
 bypass API checks to exchange caches with an older runtime.
@@ -410,7 +477,7 @@ the native path must meet it without forwarding execution to CPython. Full
 version-specific acceptance tests remain to be established. Outstanding work
 includes:
 
-- `yield from`, generalized call/class-base unpacking, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, matrix multiplication, and Python 3.12 PEP 701 f-string extensions.
+- `yield from`, generalized class-base unpacking, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, matrix multiplication, and Python 3.12 PEP 701 f-string extensions.
 - Pattern matching, exception groups, type parameters, deferred annotation semantics, and the other language/library changes through Python 3.15.2.
 - Removal or isolation of Python 2-only syntax such as tuple parameters, `print`/`exec` statements, backticks, and old exception forms.
 - Python 3 string/bytes, integer and division, iteration, import, class/metaclass, exception, and comprehension semantics.

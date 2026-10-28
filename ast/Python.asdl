@@ -67,6 +67,8 @@ module Python version "$Revision$"
 	     -- need sequences for compare to distinguish between
 	     -- x < 4 < 3 and (x < 4) < 3
 	     | Compare(expr left, cmpop* ops, expr* comparators)
+	     -- Modern calls use Starred args and keyword(None, mapping).
+	     -- Keep the legacy expansion fields for existing AST constructors.
 	     | Call(expr func, expr* args, keyword* keywords,
 			 expr? starargs, expr? kwargs)
 	     | Repr(expr value)
@@ -114,8 +116,8 @@ module Python version "$Revision$"
 		     identifier? kwarg, expr* defaults, expr* posonlyargs,
                      expr* kwonlyargs, expr* kw_defaults, keyword* annotations)
 
-        -- keyword arguments supplied to call
-        keyword = (identifier arg, expr value)
+        -- keyword arguments supplied to call; absent arg means **mapping.
+        keyword = (identifier? arg, expr value)
 
         -- import name with optional 'as' alias.
         alias = (identifier name, identifier? asname)

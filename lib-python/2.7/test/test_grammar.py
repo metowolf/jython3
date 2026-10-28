@@ -285,7 +285,11 @@ class GrammarTests(unittest.TestCase):
             return args, kwargs
         self.assertEqual(f(1, x=2, *[3, 4], y=5), ((1, 3, 4),
                                                     {'x':2, 'y':5}))
-        self.assertRaises(SyntaxError, eval, "f(1, *(2,3), 4)")
+        if sys.platform.startswith('java'):
+            # Native Python 3 call unpacking permits positional values after *.
+            self.assertEqual(eval("f(1, *(2,3), 4)", {'f': f}), ((1, 2, 3, 4), {}))
+        else:
+            self.assertRaises(SyntaxError, eval, "f(1, *(2,3), 4)")
         self.assertRaises(SyntaxError, eval, "f(1, x=2, *(3,4), x=5)")
 
         # Check ast errors in *args and *kwargs

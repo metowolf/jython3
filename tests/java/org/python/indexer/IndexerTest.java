@@ -936,6 +936,36 @@ public class IndexerTest extends TestBase {
         assertReference("attr.Foo.add@item", src.lastIndexOf("item"));
     }
 
+    public void testSingleCallUnpackingReferences() throws Exception {
+        String src = index(
+            "single_call.py",
+            "def target(*args, **kwargs):",
+            "  return 1",
+            "values = [1]",
+            "options = {'flag': 2}",
+            "target(*values, **options)");
+        assertCall("single_call.target", src.lastIndexOf("target"));
+        assertReference("single_call.values", src.lastIndexOf("values"));
+        assertReference("single_call.options", src.lastIndexOf("options"));
+    }
+
+    public void testMultipleCallUnpackingReferences() throws Exception {
+        String src = index(
+            "multiple_call.py",
+            "def target(*args, **kwargs):",
+            "  return 1",
+            "first = [1]",
+            "second = [2]",
+            "third = {'a': 3}",
+            "fourth = {'b': 4}",
+            "value = 5",
+            "target(*first, *second, **third, named=value, **fourth)");
+        assertCall("multiple_call.target", src.lastIndexOf("target"));
+        for (String name : new String[] {"first", "second", "third", "fourth", "value"}) {
+            assertReference("multiple_call." + name, src.lastIndexOf(name));
+        }
+    }
+
     public void testInstanceAttrsWithStdLib() throws Exception {
         includeStandardLibrary();
         String src = index(
