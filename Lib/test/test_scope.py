@@ -216,12 +216,19 @@ def error(y):
     return f
 """)
 
-        check_syntax_error(self, """\
+        delete_cell = """\
 def f(x):
     def g():
         return x
-    del x # can't del name
-""")
+    del x
+    return g
+"""
+        if is_jython:
+            namespace = {}
+            exec compile(delete_cell, '<delete-cell>', 'exec') in namespace
+            self.assertRaises(NameError, namespace['f'](1))
+        else:
+            check_syntax_error(self, delete_cell)
 
         check_syntax_error(self, """\
 def f():

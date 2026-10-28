@@ -276,6 +276,7 @@ class JavaVisitor(EmitVisitor):
         self.emit("", 0)
 
         self.emit("public %(name)s(PyType subType) {" % locals(), depth+1)
+        self.emit("super(subType);", depth+2)
         self.emit("}", depth+1)
         self.emit("", 0)
 
@@ -495,6 +496,11 @@ class JavaVisitor(EmitVisitor):
     def javaConstructors(self, type, name, clsname, is_product, fields, depth):
         self.emit("public %s(PyType subType) {" % (clsname), depth)
         self.emit("super(subType);", depth + 1)
+        if str(clsname) == 'arguments':
+            for field in fields:
+                if field.seq:
+                    self.emit("this.%s = new ArrayList<%s>();" %
+                              (field.name, self.javaType(field, False)), depth + 1)
         self.emit("}", depth)
 
         if len(fields) > 0:
@@ -512,7 +518,8 @@ class JavaVisitor(EmitVisitor):
         self.emit("@ExposedMethod", depth)
         self.emit("public void %s___init__(PyObject[] args, String[] keywords) {" % clsname, depth)
         self.emit('ArgParser ap = new ArgParser("%s", args, keywords, new String[]' % clsname, depth + 1)
-        self.emit('{%s}, %s, true);' % (fpargs, len(fields)), depth + 2)
+        minimum = {'FunctionDef': 4, 'arguments': 4, 'Raise': 3}.get(str(clsname), len(fields))
+        self.emit('{%s}, %s, true);' % (fpargs, minimum), depth + 2)
         i = 0
         for f in fields:
             self.emit("set%s(ap.getPyObject(%s, Py.None));" % (self.processFieldName(f.name),
@@ -527,7 +534,7 @@ class JavaVisitor(EmitVisitor):
 
             self.emit("int col = ap.getInt(%s, -1);" % str(i+1), depth + 1) 
             self.emit("if (col != -1) {", depth + 1) 
-            self.emit("setLineno(col);", depth + 2) 
+            self.emit("setCol_offset(col);", depth + 2)
             self.emit("}", depth + 1)
             self.emit("", 0)
 
@@ -568,6 +575,20 @@ class JavaVisitor(EmitVisitor):
         self.emit("}", depth)
         self.emit("", 0)
 
+        # Preserve Java callers of the original function and raise ASTs.
+        legacy = {'FunctionDef': 4, 'arguments': 4, 'Raise': 3}.get(str(clsname))
+        if legacy is not None:
+            for prefix in ([], [token], [ttype, token], [tree]):
+                oldfields = prefix + fields[:legacy]
+                declarations = [self.fieldDef(f) if prefix else 'PyObject %s' % f.name
+                                for f in oldfields]
+                values = [str(f.name) for f in oldfields]
+                values += ['null' if prefix else 'Py.None'] * (len(fields) - legacy)
+                self.emit('public %s(%s) {' % (clsname, ', '.join(declarations)), depth)
+                self.emit('this(%s);' % ', '.join(values), depth + 1)
+                self.emit('}', depth)
+                self.emit('', 0)
+
 
     #This is mainly a kludge to turn get/setType -> get/setExceptType because
     #getType conflicts with a method on PyObject.
@@ -600,6 +621,8 @@ class JavaVisitor(EmitVisitor):
                 self.emit("return Py.newInteger(%s);" % field.name, depth+1)
             elif field.typedef.simple:
                 self.emit("return AstAdapters.%s2py(%s);" % (str(field.type), field.name), depth+1)
+            elif str(field.name) in ('returns', 'cause', 'format_spec'):
+                self.emit("return %s == null ? Py.None : %s;" % (field.name, field.name), depth+1)
             else:
                 self.emit("return %s;" % field.name, depth+1)
             #self.emit("return Py.None;", depth+1)
@@ -707,7 +730,52 @@ def main(outdir, grammar="Python.asdl"):
                         VisitorVisitor(outdir))
     c.visit(mod)
 
-indexer_support = {"Attribute": """    // Support for indexer below
+indexer_support = {
+"JoinedStr": """
+    @Override
+    public int traverse(Visitproc visit, Object arg) {
+        int result = super.traverse(visit, arg);
+        if (result != 0) return result;
+        if (values != null) {
+            for (expr value : values) {
+                if (value != null) {
+                    result = visit.visit(value, arg);
+                    if (result != 0) return result;
+                }
+            }
+        }
+        return __dict__ == null ? 0 : visit.visit(__dict__, arg);
+    }
+
+    @Override
+    public boolean refersDirectlyTo(PyObject ob) {
+        return ob != null && (ob == __dict__ || values != null && values.contains(ob)
+                || super.refersDirectlyTo(ob));
+    }
+""",
+"FormattedValue": """
+    @Override
+    public int traverse(Visitproc visit, Object arg) {
+        int result = super.traverse(visit, arg);
+        if (result != 0) return result;
+        if (value != null) {
+            result = visit.visit(value, arg);
+            if (result != 0) return result;
+        }
+        if (format_spec != null) {
+            result = visit.visit(format_spec, arg);
+            if (result != 0) return result;
+        }
+        return __dict__ == null ? 0 : visit.visit(__dict__, arg);
+    }
+
+    @Override
+    public boolean refersDirectlyTo(PyObject ob) {
+        return ob != null && (ob == value || ob == format_spec || ob == __dict__
+                || super.refersDirectlyTo(ob));
+    }
+""",
+"Attribute": """    // Support for indexer below
 
     private Name attrName;
     public Name getInternalAttrName() {
@@ -777,24 +845,12 @@ indexer_support = {"Attribute": """    // Support for indexer below
     }
     public FunctionDef(Token token, Name name, arguments args, java.util.List<stmt> body,
             java.util.List<expr> decorator_list) {
-        super(token);
-        this.name = name.getText();
+        this(token, name, args, body, decorator_list, null);
+    }
+    public FunctionDef(Token token, Name name, arguments args, java.util.List<stmt> body,
+            java.util.List<expr> decorator_list, expr returns) {
+        this(token, name.getText(), args, body, decorator_list, returns);
         this.nameNode = name;
-        this.args = args;
-        this.body = body;
-        if (body == null) {
-            this.body = new ArrayList<stmt>();
-        }
-        for(PythonTree t : this.body) {
-            addChild(t);
-        }
-        this.decorator_list = decorator_list;
-        if (decorator_list == null) {
-            this.decorator_list = new ArrayList<expr>();
-        }
-        for(PythonTree t : this.decorator_list) {
-            addChild(t);
-        }
     }
     // End indexer support
 """,
@@ -885,25 +941,10 @@ indexer_support = {"Attribute": """    // Support for indexer below
     // String, String, List<expr>) version of the constructor.
     public arguments(Token token, java.util.List<expr> args, Name vararg, Name kwarg,
             java.util.List<expr> defaults) {
-        super(token);
-        this.args = args;
-        if (args == null) {
-            this.args = new ArrayList<expr>();
-        }
-        for(PythonTree t : this.args) {
-            addChild(t);
-        }
-        this.vararg = vararg == null ? null : vararg.getText();
+        this(token, args, vararg == null ? null : vararg.getText(),
+                kwarg == null ? null : kwarg.getText(), defaults);
         this.varargName = vararg;
-        this.kwarg = kwarg == null ? null : kwarg.getText();
         this.kwargName = kwarg;
-        this.defaults = defaults;
-        if (defaults == null) {
-            this.defaults = new ArrayList<expr>();
-        }
-        for(PythonTree t : this.defaults) {
-            addChild(t);
-        }
     }
     // End indexer support
 
@@ -925,12 +966,15 @@ indexer_support = {"Attribute": """    // Support for indexer below
                 }
             }
         }
-        if (defaults != null) {
-            for (PyObject ob: defaults) {
-                if (ob != null) {
-                    retVal = visit.visit(ob, arg);
-                    if (retVal != 0) {
-                        return retVal;
+        for (java.util.List<? extends PyObject> values : java.util.Arrays.asList(
+                defaults, posonlyargs, kwonlyargs, kw_defaults, annotations)) {
+            if (values != null) {
+                for (PyObject ob : values) {
+                    if (ob != null) {
+                        retVal = visit.visit(ob, arg);
+                        if (retVal != 0) {
+                            return retVal;
+                        }
                     }
                 }
             }
@@ -944,9 +988,13 @@ indexer_support = {"Attribute": """    // Support for indexer below
             return false;
         } else if (args != null && args.contains(ob)) {
             return true;
-        } else if (defaults != null && defaults.contains(ob)) {
-            return true;
         } else {
+            for (java.util.List<? extends PyObject> values : java.util.Arrays.asList(
+                    defaults, posonlyargs, kwonlyargs, kw_defaults, annotations)) {
+                if (values != null && values.contains(ob)) {
+                    return true;
+                }
+            }
             return super.refersDirectlyTo(ob);
         }
     }
@@ -1027,4 +1075,3 @@ if __name__ == "__main__":
         main(OUT_DIR, args[0])
     else:
         main(OUT_DIR)
-

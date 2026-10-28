@@ -230,6 +230,7 @@ attr
     | FROM
     | FOR
     | GLOBAL
+    | NONLOCAL
     | IF
     | IMPORT
     | IN
@@ -265,37 +266,25 @@ decorators
     : decorator+
     ;
 
-//funcdef: [decorators] 'def' NAME parameters ':' suite
+// Function and lambda parameters mirror Python.g for interactive input.
 funcdef
-    : decorators? DEF NAME parameters COLON suite
+    : decorators? DEF NAME parameters (RARROW test)? COLON suite
     ;
 
-//parameters: '(' [varargslist] ')'
 parameters
-    : LPAREN
-      (varargslist
-      |
-      )
-      RPAREN
+    : LPAREN varargslist[true]? RPAREN
     ;
 
-//not in CPython's Grammar file
-defparameter
-    : fpdef (ASSIGN test)?
+varargslist[boolean allowAnnotations]
+    : parameter[allowAnnotations]
+      (options {greedy=true;}: COMMA parameter[allowAnnotations])* COMMA?
     ;
 
-//varargslist: ((fpdef ['=' test] ',')*
-//              ('*' NAME [',' '**' NAME] | '**' NAME) |
-//              fpdef ['=' test] (',' fpdef ['=' test])* [','])
-varargslist
-    : defparameter (options {greedy=true;}:COMMA defparameter)*
-      (COMMA
-          (STAR NAME (COMMA DOUBLESTAR NAME)?
-          | DOUBLESTAR NAME
-          )?
-      )?
-    | STAR NAME (COMMA DOUBLESTAR NAME)?
-    | DOUBLESTAR NAME
+parameter[boolean allowAnnotations]
+    : fpdef ({allowAnnotations}? => COLON test)? (ASSIGN test)?
+    | STAR (NAME ({allowAnnotations}? => COLON test)?)?
+    | DOUBLESTAR NAME ({allowAnnotations}? => COLON test)?
+    | SLASH
     ;
 
 //fpdef: NAME | '(' fplist ')'
@@ -331,6 +320,7 @@ small_stmt : expr_stmt
            | flow_stmt
            | import_stmt
            | global_stmt
+           | nonlocal_stmt
            | exec_stmt
            | assert_stmt
            ;
@@ -434,8 +424,7 @@ yield_stmt
 
 //raise_stmt: 'raise' [test [',' test [',' test]]]
 raise_stmt
-    : RAISE (test (COMMA test
-        (COMMA test)?)?)?
+    : RAISE (test (FROM test | COMMA test (COMMA test)?)?)?
     ;
 
 //import_stmt: import_name | import_from
@@ -488,6 +477,10 @@ dotted_name
 //global_stmt: 'global' NAME (',' NAME)*
 global_stmt
     : GLOBAL NAME (COMMA NAME)*
+    ;
+
+nonlocal_stmt
+    : NONLOCAL NAME (COMMA NAME)*
     ;
 
 //exec_stmt: 'exec' expr ['in' test [',' test]]
@@ -775,7 +768,7 @@ testlist_gexp
 
 //lambdef: 'lambda' [varargslist] ':' test
 lambdef
-    : LAMBDA (varargslist)? COLON test
+    : LAMBDA (varargslist[false])? COLON test
     ;
 
 //trailer: '(' [arglist] ')' | '[' subscriptlist ']' | '.' NAME
@@ -932,6 +925,7 @@ FINALLY   : 'finally' ;
 FROM      : 'from' ;
 FOR       : 'for' ;
 GLOBAL    : 'global' ;
+NONLOCAL  : 'nonlocal' ;
 IF        : 'if' ;
 IMPORT    : 'import' ;
 IN        : 'in' ;
@@ -964,6 +958,8 @@ SEMI    : ';' ;
 PLUS    : '+' ;
 
 MINUS    : '-' ;
+
+RARROW    : '->' ;
 
 STAR    : '*' ;
 
@@ -1081,13 +1077,14 @@ NAME:    ( 'a' .. 'z' | 'A' .. 'Z' | '_')
  *  should make us exit loop not continue.
  */
 STRING
-    :   ('r'|'u'|'ur'|'R'|'U'|'UR'|'uR'|'Ur')?
+    :   ('r'|'u'|'ur'|'R'|'U'|'UR'|'uR'|'Ur'|'f'|'F'|'fr'|'fR'|'Fr'|'FR'|'rf'|'rF'|'Rf'|'RF')?
         (   '\'\'\'' (options {greedy=false;}:TRIAPOS)* '\'\'\''
         |   '"""' (options {greedy=false;}:TRIQUOTE)* '"""'
         |   '"' (ESC|~('\\'|'\n'|'"'))* '"'
         |   '\'' (ESC|~('\\'|'\n'|'\''))* '\''
         ) {
-           if (state.tokenStartLine != input.getLine()) {
+           if (state.tokenStartLine != input.getLine()
+                   && !FStringParser.isFormatted(getText())) {
                state.tokenStartLine = input.getLine();
                state.tokenStartCharPositionInLine = -2;
            }
@@ -1095,14 +1092,14 @@ STRING
     ;
 
 TRISTRINGPART
-    : ('r'|'u'|'ur'|'R'|'U'|'UR'|'uR'|'Ur')?
+    : ('r'|'u'|'ur'|'R'|'U'|'UR'|'uR'|'Ur'|'f'|'F'|'fr'|'fR'|'Fr'|'FR'|'rf'|'rF'|'Rf'|'RF')?
         (   '\'\'\'' ~('\'\'\'')*
         |   '"""' ~('"""')*
         )
     ;
 
 STRINGPART
-    : ('r'|'u'|'ur'|'R'|'U'|'UR'|'uR'|'Ur')?
+    : ('r'|'u'|'ur'|'R'|'U'|'UR'|'uR'|'Ur'|'f'|'F'|'fr'|'fR'|'Fr'|'FR'|'rf'|'rF'|'Rf'|'RF')?
         (   '"' (ESC|~('\\'|'\n'|'"'))* CONTINUED_LINE
         |   '\'' (ESC|~('\\'|'\n'|'\''))* CONTINUED_LINE
         )

@@ -1007,6 +1007,16 @@ public final class Py extends PrePy {
                 moreflags);
     }
 
+    public static PyCode newCode(int argcount, String[] varnames,
+            String filename, String name, int firstlineno,
+            boolean args, boolean keywords, PyFunctionTable funcs, int func_id,
+            String[] cellvars, String[] freevars, int npurecell, int moreflags,
+            int posonlyargcount, int kwonlyargcount) {
+        return new PyTableCode(argcount, varnames, filename, name, firstlineno,
+                args, keywords, funcs, func_id, cellvars, freevars, npurecell,
+                moreflags, posonlyargcount, kwonlyargcount);
+    }
+
     // --
     public static PyCode newCode(int argcount, String varnames[],
             String filename, String name,
@@ -1487,7 +1497,42 @@ public final class Py extends PrePy {
      * @return string representation of the traceback and exception
      */
     static String exceptionToString(PyObject type, PyObject value, PyObject tb) {
+        java.util.Set<PyObject> seen = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<PyObject, Boolean>());
+        List<PyObject[]> chain = new ArrayList<PyObject[]>();
+        List<String> separators = new ArrayList<String>();
+        while (seen.add(value)) {
+            chain.add(new PyObject[] {type, value, tb});
+            if (!(value instanceof PyBaseException)) {
+                break;
+            }
+            PyBaseException exception = (PyBaseException)value;
+            PyObject next = exception.getCause();
+            String separator = "\nThe above exception was the direct cause of the following exception:\n\n";
+            if (next == None && !exception.getSuppressContext().__nonzero__()) {
+                next = exception.getContext();
+                separator = "\nDuring handling of the above exception, another exception occurred:\n\n";
+            }
+            if (!(next instanceof PyBaseException) || seen.contains(next)) {
+                break;
+            }
+            separators.add(separator);
+            value = next;
+            type = value.getType();
+            tb = ((PyBaseException)value).getTraceback();
+        }
+        StringBuilder result = new StringBuilder();
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            PyObject[] entry = chain.get(i);
+            result.append(singleExceptionToString(entry[0], entry[1], entry[2]));
+            if (i > 0) {
+                result.append(separators.get(i - 1));
+            }
+        }
+        return result.toString();
+    }
 
+    private static String singleExceptionToString(PyObject type, PyObject value, PyObject tb) {
         // Compose the stack dump, syntax error, and actual exception in this buffer:
         StringBuilder buf;
 
@@ -1660,6 +1705,45 @@ public final class Py extends PrePy {
 
     public static void assert_(PyObject test) {
         assert_(test, Py.None);
+    }
+
+    /** Find the nearest dynamically active handler, including a resumed generator's own. */
+    public static PyException getHandledException() {
+        for (PyFrame frame = getFrame(); frame != null; frame = frame.f_back) {
+            if (frame.handledException != null) {
+                return frame.handledException;
+            }
+        }
+        return null;
+    }
+
+    public static PyException pushException(PyFrame frame, PyException exception) {
+        PyException previous = frame.handledException;
+        frame.handledException = exception;
+        getThreadState().exception = exception;
+        return previous;
+    }
+
+    public static void popException(PyFrame frame, PyException previous) {
+        frame.handledException = previous;
+        getThreadState().exception = getHandledException();
+    }
+
+    /** Normalize while the handler is active, restoring state even if construction fails. */
+    public static PyException leaveException(Throwable throwable, PyFrame frame,
+            PyException previous) {
+        try {
+            return prepareException(throwable);
+        } finally {
+            popException(frame, previous);
+        }
+    }
+
+    /** Normalize before leaving a handler so implicit context is not lost. */
+    public static PyException prepareException(Throwable throwable) {
+        PyException exception = JavaError(throwable);
+        exception.normalize();
+        return exception;
     }
 
     /* Helpers to implement finally clauses */

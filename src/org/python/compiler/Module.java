@@ -273,6 +273,7 @@ class PyCodeConstant extends Constant implements ClassConstants, Opcodes {
 
     final String co_name;
     final int argcount;
+    final int posonlyargcount, kwonlyargcount;
     final List<String> names;
     final int id;
     final int co_firstlineno;
@@ -299,6 +300,8 @@ class PyCodeConstant extends Constant implements ClassConstants, Opcodes {
             arglist = scope.ac.arglist;
             keywordlist = scope.ac.keywordlist;
             argcount = scope.ac.names.size();
+            posonlyargcount = scope.ac.posonlyargcount;
+            kwonlyargcount = scope.ac.kwonlyargcount;
 
             // Do something to add init_code to tree
             // XXX: not sure we should be modifying scope.ac in a PyCodeConstant
@@ -310,6 +313,7 @@ class PyCodeConstant extends Constant implements ClassConstants, Opcodes {
             arglist = false;
             keywordlist = false;
             argcount = 0;
+            posonlyargcount = kwonlyargcount = 0;
         }
 
         id = module.codes.size();
@@ -431,13 +435,16 @@ class PyCodeConstant extends Constant implements ClassConstants, Opcodes {
         c.iconst(jy_npurecell);
 
         c.iconst(moreflags);
+        c.iconst(posonlyargcount);
+        c.iconst(kwonlyargcount);
 
         c.invokestatic(
                 p(Py.class),
                 "newCode",
                 sig(PyCode.class, Integer.TYPE, String[].class, String.class, String.class,
                         Integer.TYPE, Boolean.TYPE, Boolean.TYPE, PyFunctionTable.class,
-                        Integer.TYPE, String[].class, String[].class, Integer.TYPE, Integer.TYPE));
+                        Integer.TYPE, String[].class, String[].class, Integer.TYPE, Integer.TYPE,
+                        Integer.TYPE, Integer.TYPE));
         c.putstatic(module.classfile.name, name, ci(PyCode.class));
     }
 }

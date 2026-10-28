@@ -8,6 +8,16 @@ the implementation of Python in Java.
 Only version 2.7 of Python can be supported at present
 (but watch this space for a 3.x version).
 
+This working tree contains an experimental, native Python 3 migration:
+function annotations, keyword-only and positional-only parameters, `nonlocal`,
+exception chaining (`raise ... from ...`), and PEP 498 f-strings with debug fields.
+It is **not a complete Python 3 implementation**; the runtime and standard library
+are still based on Python 2.7. Python 3.12's PEP 701 f-string extensions are not
+implemented. Some Python 2 behaviors deliberately change, including closure-cell
+deletion and restoration of exception state when leaving a handler. See
+[migration status](PYTHON3_MIGRATION.md) for the supported subset, build commands,
+tests, compatibility boundaries, and remaining work.
+
 ## Compatibility
 
 Jython provides good compatibility with Python 2.7 *the language*.

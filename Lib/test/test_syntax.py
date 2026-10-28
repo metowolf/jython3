@@ -481,10 +481,17 @@ class SyntaxTestCase(unittest.TestCase):
         source = re.sub('(?m)^ *:', '', """\
             :def foo(x):
             :  def bar():
-            :    print x
+            :    return x
             :  del x
+            :  return bar
             :""")
-        self._check_error(source, "nested scope")
+        if test_support.is_jython:
+            # Python 3 permits clearing a cell captured by a nested function.
+            namespace = {}
+            eval(compile(source, '<delete-cell>', 'exec'), namespace)
+            self.assertRaises(NameError, namespace['foo'](1))
+        else:
+            self._check_error(source, "nested scope")
 
     def test_unexpected_indent(self):
         if test_support.is_jython:

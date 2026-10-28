@@ -8,15 +8,20 @@ import org.python.antlr.ast.ClassDef;
 import org.python.antlr.ast.DictComp;
 import org.python.antlr.ast.Exec;
 import org.python.antlr.ast.Expression;
+import org.python.antlr.ast.FormattedValue;
 import org.python.antlr.ast.FunctionDef;
 import org.python.antlr.ast.GeneratorExp;
 import org.python.antlr.ast.Global;
+import org.python.antlr.ast.JoinedStr;
+import org.python.antlr.ast.Str;
 import org.python.antlr.ast.Import;
 import org.python.antlr.ast.ImportFrom;
 import org.python.antlr.ast.Interactive;
 import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.ListComp;
 import org.python.antlr.ast.Name;
+import org.python.antlr.ast.Nonlocal;
+import org.python.antlr.ast.Raise;
 import org.python.antlr.ast.Return;
 import org.python.antlr.ast.SetComp;
 import org.python.antlr.ast.Tuple;
@@ -25,6 +30,7 @@ import org.python.antlr.ast.Yield;
 import org.python.antlr.ast.arguments;
 import org.python.antlr.ast.comprehension;
 import org.python.antlr.ast.expr_contextType;
+import org.python.antlr.ast.keyword;
 import org.python.antlr.base.expr;
 import org.python.antlr.base.stmt;
 import org.python.core.ParserFacade;
@@ -89,6 +95,10 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     public void parse(PythonTree node) throws Exception {
         try {
             visit(node);
+            // Outer bindings may follow the nested function's definition in source order.
+            for (ScopeInfo scope : nodeScopes.values()) {
+                scope.validateNonlocals(code_compiler);
+            }
         } catch (Throwable t) {
             throw ParserFacade.fixParseError(null, t, code_compiler.getFilename());
         }
@@ -129,14 +139,20 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         ArgListCompiler ac = new ArgListCompiler();
         ac.visitArgs(node.getInternalArgs());
 
-        List<expr> defaults = ac.getDefaults();
-        for (int i = 0; i < defaults.size(); i++) {
-            visit(defaults.get(i));
+        for (expr decorator : node.getInternalDecorator_list()) {
+            visit(decorator);
         }
-
-        List<expr> decs = node.getInternalDecorator_list();
-        for (int i = decs.size() - 1; i >= 0; i--) {
-            visit(decs.get(i));
+        for (expr value : ac.getDefaults()) {
+            visit(value);
+        }
+        for (keyword value : ac.kwDefaults) {
+            visit(value.getInternalValue());
+        }
+        for (keyword annotation : ac.annotations) {
+            visit(annotation.getInternalValue());
+        }
+        if (node.getInternalReturns() != null) {
+            visit(node.getInternalReturns());
         }
 
         beginScope(node.getInternalName(), FUNCSCOPE, node, ac);
@@ -161,6 +177,9 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         List<? extends PythonTree> defaults = ac.getDefaults();
         for (int i = 0; i < defaults.size(); i++) {
             visit(defaults.get(i));
+        }
+        for (keyword value : ac.kwDefaults) {
+            visit(value.getInternalValue());
         }
 
         beginScope("<lambda>", FUNCSCOPE, node, ac);
@@ -216,12 +235,53 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     }
 
     @Override
+    public Object visitJoinedStr(JoinedStr node) throws Exception {
+        for (expr value : node.getInternalValues()) {
+            if (!(value instanceof Str || value instanceof FormattedValue)) {
+                code_compiler.error("JoinedStr values must be strings or FormattedValue nodes",
+                        true, node);
+            }
+        }
+        traverse(node);
+        return null;
+    }
+
+    @Override
+    public Object visitFormattedValue(FormattedValue node) throws Exception {
+        Integer conversion = node.getInternalConversion();
+        if (node.getInternalValue() == null || conversion == null
+                || conversion != -1 && conversion != 's' && conversion != 'r' && conversion != 'a') {
+            code_compiler.error("invalid FormattedValue value or conversion", true, node);
+        }
+        if (node.getInternalFormat_spec() != null
+                && !(node.getInternalFormat_spec() instanceof JoinedStr)) {
+            code_compiler.error("FormattedValue format_spec must be a JoinedStr", true, node);
+        }
+        traverse(node);
+        return null;
+    }
+
+    @Override
+    public Object visitRaise(Raise node) throws Exception {
+        if (node.getInternalCause() != null
+                && (node.getInternalType() == null || node.getInternalInst() != null
+                || node.getInternalTback() != null)) {
+            code_compiler.error("raise from requires an exception and no legacy arguments", true, node);
+        }
+        traverse(node);
+        return null;
+    }
+
+    @Override
     public Object visitGlobal(Global node) throws Exception {
         int n = node.getInternalNames().size();
         for (int i = 0; i < n; i++) {
             String name = node.getInternalNames().get(i);
             int prev = cur.addGlobal(name);
             if (prev >= 0) {
+                if ((prev & NONLOCAL) != 0) {
+                    code_compiler.error("name '" + name + "' is nonlocal and global", true, node);
+                }
                 if ((prev & FROM_PARAM) != 0) {
                     code_compiler.error("name '" + name
                             + "' is local and global", true, node);
@@ -238,6 +298,39 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
                 code_compiler.error("name '" + name
                         + "' declared global after " + what, false, node);
             }
+        }
+        return null;
+    }
+
+    @Override
+    public Object visitNonlocal(Nonlocal node) throws Exception {
+        if (cur.kind == TOPSCOPE) {
+            code_compiler.error("nonlocal declaration not allowed at module level", true, node);
+        }
+        if (node.getInternalNames() == null || node.getInternalNames().isEmpty()) {
+            code_compiler.error("nonlocal declaration requires a name", true, node);
+        }
+        for (String name : node.getInternalNames()) {
+            if (name == null || name.equals("None") || name.equals("__debug__")) {
+                code_compiler.error("invalid nonlocal name", true, node);
+            }
+            SymInfo previous = cur.tbl.get(name);
+            if (previous != null) {
+                int flags = previous.flags;
+                if ((flags & NONLOCAL) != 0 && (flags & (NONLOCAL_USED | NONLOCAL_ASSIGNED)) == 0) {
+                    continue;
+                }
+                if ((flags & GLOBAL) != 0) {
+                    code_compiler.error("name '" + name + "' is nonlocal and global", true, node);
+                }
+                if ((flags & PARAM) != 0) {
+                    code_compiler.error("name '" + name + "' is parameter and nonlocal", true, node);
+                }
+                code_compiler.error("name '" + name + "' is "
+                        + ((flags & (BOUND | NONLOCAL_ASSIGNED)) != 0 ? "assigned to" : "used")
+                        + " prior to nonlocal declaration", true, node);
+            }
+            cur.addNonlocal(name, node);
         }
         return null;
     }

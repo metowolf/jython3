@@ -27,6 +27,7 @@ public abstract class expr extends PythonTree {
     }
 
     public expr(PyType subType) {
+        super(subType);
     }
 
     public expr(int ttype, Token token) {

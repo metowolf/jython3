@@ -52,6 +52,7 @@ public class AstModule implements ClassDictInit {
         dict.__setitem__("FunctionDef", FunctionDef.TYPE);
         dict.__setitem__("GeneratorExp", GeneratorExp.TYPE);
         dict.__setitem__("Global", Global.TYPE);
+        dict.__setitem__("Nonlocal", Nonlocal.TYPE);
         dict.__setitem__("If", If.TYPE);
         dict.__setitem__("IfExp", IfExp.TYPE);
         dict.__setitem__("Import", Import.TYPE);
@@ -72,6 +73,8 @@ public class AstModule implements ClassDictInit {
         dict.__setitem__("SetComp", SetComp.TYPE);
         dict.__setitem__("Slice", Slice.TYPE);
         dict.__setitem__("Str", Str.TYPE);
+        dict.__setitem__("JoinedStr", JoinedStr.TYPE);
+        dict.__setitem__("FormattedValue", FormattedValue.TYPE);
         dict.__setitem__("Subscript", Subscript.TYPE);
         dict.__setitem__("Suite", Suite.TYPE);
         dict.__setitem__("TryExcept", TryExcept.TYPE);

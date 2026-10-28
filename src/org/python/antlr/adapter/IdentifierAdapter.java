@@ -26,8 +26,8 @@ public class IdentifierAdapter implements AstAdapter {
     public List iter2ast(PyObject iter) {
         List<String> identifiers = new ArrayList<String>();
         if (iter != Py.None) {
-            for(Object o : (Iterable)iter) {
-                identifiers.add((String)py2ast((PyObject)o));
+            for (PyObject value : iter.asIterable()) {
+                identifiers.add((String)py2ast(value));
             }
         }
         return identifiers;

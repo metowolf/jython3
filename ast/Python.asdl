@@ -9,8 +9,8 @@ module Python version "$Revision$"
 	    -- not really an actual node but useful in Jython's typesystem.
 	    | Suite(stmt* body)
 
-	stmt = FunctionDef(identifier name, arguments args, 
-                            stmt* body, expr* decorator_list)
+	stmt = FunctionDef(identifier name, arguments args,
+                            stmt* body, expr* decorator_list, expr? returns)
 	      | ClassDef(identifier name, expr* bases, stmt* body, expr* decorator_list)
 	      | Return(expr? value)
 
@@ -28,7 +28,7 @@ module Python version "$Revision$"
 	      | With(expr context_expr, expr? optional_vars, stmt* body)
 
 	      -- 'type' is a bad name
-	      | Raise(expr? type, expr? inst, expr? tback)
+	      | Raise(expr? type, expr? inst, expr? tback, expr? cause)
 	      | TryExcept(stmt* body, excepthandler* handlers, stmt* orelse)
 	      | TryFinally(stmt* body, stmt* finalbody)
 	      | Assert(expr test, expr? msg)
@@ -42,6 +42,7 @@ module Python version "$Revision$"
 	      | Exec(expr body, expr? globals, expr? locals)
 
 	      | Global(identifier* names)
+	      | Nonlocal(identifier* names)
 	      | Expr(expr value)
 	      | Pass | Break | Continue
 
@@ -71,6 +72,8 @@ module Python version "$Revision$"
 	     | Repr(expr value)
 	     | Num(object n) -- a number as a PyObject.
 	     | Str(string s) -- need to specify raw, unicode, etc?
+	     | JoinedStr(expr* values)
+	     | FormattedValue(expr value, int conversion, expr? format_spec)
 	     -- other literals? bools?
 
 	     -- the following expression can appear in assignment context
@@ -104,8 +107,11 @@ module Python version "$Revision$"
 	excepthandler = ExceptHandler(expr? type, expr? name, stmt* body)
 	                attributes (int lineno, int col_offset)
 
-	arguments = (expr* args, identifier? vararg, 
-		     identifier? kwarg, expr* defaults)
+        -- Transitional AST: retain the legacy parameter nodes and constructor order.
+        -- Annotation entries map parameter names to expressions, in source order.
+	arguments = (expr* args, identifier? vararg,
+		     identifier? kwarg, expr* defaults, expr* posonlyargs,
+                     expr* kwonlyargs, expr* kw_defaults, keyword* annotations)
 
         -- keyword arguments supplied to call
         keyword = (identifier arg, expr value)

@@ -34,8 +34,10 @@ import org.python.antlr.ast.Expr;
 import org.python.antlr.ast.Expression;
 import org.python.antlr.ast.ExtSlice;
 import org.python.antlr.ast.For;
+import org.python.antlr.ast.FormattedValue;
 import org.python.antlr.ast.FunctionDef;
 import org.python.antlr.ast.GeneratorExp;
+import org.python.antlr.ast.JoinedStr;
 import org.python.antlr.ast.Global;
 import org.python.antlr.ast.If;
 import org.python.antlr.ast.IfExp;
@@ -47,6 +49,7 @@ import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.List;
 import org.python.antlr.ast.ListComp;
 import org.python.antlr.ast.Name;
+import org.python.antlr.ast.Nonlocal;
 import org.python.antlr.ast.Num;
 import org.python.antlr.ast.Pass;
 import org.python.antlr.ast.Print;
@@ -78,6 +81,7 @@ import org.python.antlr.base.stmt;
 import org.python.core.CompilerFlags;
 import org.python.core.ContextGuard;
 import org.python.core.ContextManager;
+import org.python.core.FStringSupport;
 import org.python.core.imp;
 import org.python.core.Py;
 import org.python.core.PyCode;
@@ -495,9 +499,12 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
 
         ScopeInfo scope = module.getScopeInfo(node);
 
-        // NOTE: this is attached to the constructed PyFunction, so it cannot be nulled out
-        // with freeArray, unlike other usages of makeArray here
+        int decorators = node.getInternalDecorator_list().isEmpty() ? -1
+                : makeArray(node.getInternalDecorator_list());
+        // These values belong to the function and must survive decorator application.
         int defaults = makeArray(scope.ac.getDefaults());
+        int kwDefaults = makeFunctionDictionary(scope.ac.kwDefaults, null);
+        int annotations = makeFunctionDictionary(scope.ac.annotations, node.getInternalReturns());
 
         code.new_(p(PyFunction.class));
         code.dup();
@@ -529,10 +536,67 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                             PyObject[].class));
         }
 
-        applyDecorators(node.getInternalDecorator_list());
+        setFunctionDictionary(kwDefaults, "setKwDefaults");
+        setFunctionDictionary(annotations, "setAnnotations");
+        if (decorators >= 0) {
+            applyDecorators(decorators, node.getInternalDecorator_list().size());
+        }
 
         set(new Name(node, node.getInternalName(), expr_contextType.Store));
         return null;
+    }
+
+    /** Evaluate in the defining scope, with an empty operand stack at each expression. */
+    private int makeFunctionDictionary(java.util.List<keyword> entries, expr returns)
+            throws Exception {
+        if (entries.isEmpty() && returns == null) {
+            return -1;
+        }
+        java.util.List<expr> elements = new ArrayList<expr>();
+        for (keyword entry : entries) {
+            // Parameter slots currently retain their source names, including private names.
+            elements.add(new Str(entry, Py.newString(entry.getInternalArg())));
+            elements.add(entry.getInternalValue());
+        }
+        if (returns != null) {
+            elements.add(new Str(returns, Py.newString("return")));
+            elements.add(returns);
+        }
+        int array = makeArray(elements);
+        code.new_(p(PyDictionary.class));
+        code.dup();
+        code.aload(array);
+        code.invokespecial(p(PyDictionary.class), "<init>", sig(Void.TYPE, PyObject[].class));
+        int result = storeTop();
+        freeArray(array);
+        return result;
+    }
+
+    /** Attach a pre-evaluated dictionary, leaving the function on the stack. */
+    private void setFunctionDictionary(int dictionary, String setter) throws Exception {
+        if (dictionary >= 0) {
+            code.dup();
+            code.aload(dictionary);
+            code.invokevirtual(p(PyFunction.class), setter, sig(Void.TYPE, PyObject.class));
+            code.freeLocal(dictionary);
+        }
+    }
+
+    private void applyDecorators(int decorators, int count) throws Exception {
+        int result = storeTop();
+        for (int i = count - 1; i >= 0; i--) {
+            code.aload(decorators);
+            code.iconst(i);
+            code.aaload();
+            loadThreadState();
+            code.aload(result);
+            code.invokevirtual(p(PyObject.class), "__call__",
+                    sig(PyObject.class, ThreadState.class, PyObject.class));
+            code.astore(result);
+        }
+        freeArray(decorators);
+        code.aload(result);
+        code.freeLocal(result);
     }
 
     private void applyDecorators(java.util.List<expr> decorators) throws Exception {
@@ -700,7 +764,8 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         code.instanceof_(p(PyException.class));
         Label done2 = new Label();
         code.ifeq(done2);
-        code.checkcast(p(Throwable.class));
+        code.checkcast(p(PyException.class));
+        code.invokevirtual(p(PyException.class), "chainContext", sig(PyException.class));
         code.athrow();
         code.label(done2);
         code.checkcast(p(PyObject.class));
@@ -890,6 +955,20 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     @Override
     public Object visitRaise(Raise node) throws Exception {
         setline(node);
+        if (node.getInternalCause() != null) {
+            if (node.getInternalType() == null || node.getInternalInst() != null
+                    || node.getInternalTback() != null) {
+                throw new ParseException("raise from requires an exception and no legacy arguments", node);
+            }
+            visit(node.getInternalType());
+            stackProduce();
+            visit(node.getInternalCause());
+            stackConsume();
+            code.invokestatic(p(PyException.class), "doRaiseFrom",
+                    sig(PyException.class, PyObject.class, PyObject.class));
+            code.athrow();
+            return Exit;
+        }
         if (node.getInternalType() != null) {
             visit(node.getInternalType());
             stackProduce();
@@ -1026,6 +1105,11 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
 
     @Override
     public Object visitGlobal(Global node) throws Exception {
+        return null;
+    }
+
+    @Override
+    public Object visitNonlocal(Nonlocal node) throws Exception {
         return null;
     }
 
@@ -1280,8 +1364,10 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
 
             if (handler.getInternalType() != null) {
                 code.aload(exc);
+                stackProduce(p(PyException.class));
                 // get specific exception
                 visit(handler.getInternalType());
+                stackConsume();
                 code.invokevirtual(p(PyException.class), "match", sig(Boolean.TYPE, PyObject.class));
                 code.ifeq(end_of_self);
             } else {
@@ -1344,12 +1430,18 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         code.astore(excLocal);
 
         code.aload(excLocal);
+        code.invokestatic(p(Py.class), "prepareException", sig(PyException.class, Throwable.class));
+        code.astore(excLocal);
+        code.aload(excLocal);
+        code.checkcast(p(PyException.class));
         loadFrame();
+        code.iconst_1();
+        code.invokevirtual(p(PyException.class), "tracebackHere",
+                sig(Void.TYPE, PyFrame.class, Boolean.TYPE));
 
-        code.invokestatic(p(Py.class), "addTraceback",
-                sig(Void.TYPE, Throwable.class, PyFrame.class));
-
+        ExceptionContext context = beginExceptionContext(excLocal);
         inlineFinally(inFinally);
+        endExceptionContext(context);
         code.aload(excLocal);
         code.checkcast(p(Throwable.class));
         code.athrow();
@@ -1434,20 +1526,18 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         int exc = code.getFinallyLocal(p(Throwable.class));
         code.astore(exc);
 
-        if (node.getInternalOrelse() == null) {
-            // No else clause to worry about
-            exceptionTest(exc, handler_end, node, 1);
-            code.label(handler_end);
-        } else {
-            // Have else clause
-            Label else_end = new Label();
-            exceptionTest(exc, else_end, node, 1);
-            code.label(handler_end);
-
-            // do else clause
+        ExceptionContext context = beginExceptionContext(exc);
+        Label handled = new Label();
+        Label else_end = new Label();
+        exceptionTest(exc, handled, node, 1);
+        code.label(handled);
+        endExceptionContext(context);
+        code.goto_(else_end);
+        code.label(handler_end);
+        if (node.getInternalOrelse() != null) {
             suite(node.getInternalOrelse());
-            code.label(else_end);
         }
+        code.label(else_end);
 
         code.freeFinallyLocal(exc);
         handler.addExceptionHandlers(handler_start);
@@ -2298,6 +2388,7 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         ScopeInfo scope = module.getScopeInfo(node);
 
         int defaultsArray = makeArray(scope.ac.getDefaults());
+        int kwDefaults = makeFunctionDictionary(scope.ac.kwDefaults, null);
 
         code.new_(p(PyFunction.class));
 
@@ -2324,6 +2415,7 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                     "<init>",
                     sig(Void.TYPE, PyObject.class, PyObject[].class, PyCode.class, PyObject[].class));
         }
+        setFunctionDictionary(kwDefaults, "setKwDefaults");
         return null;
     }
 
@@ -2444,7 +2536,8 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     @Override
     public Object visitName(Name node) throws Exception {
         String name;
-        if (fast_locals) {
+        SymInfo sourceSymbol = tbl.get(node.getInternalId());
+        if (fast_locals || sourceSymbol != null && (sourceSymbol.flags & ScopeInfo.NONLOCAL) != 0) {
             name = node.getInternalId();
         } else {
             name = getName(node.getInternalId());
@@ -2495,7 +2588,12 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
             case Param:
             case Store:
                 loadFrame();
-                if (syminf != null && (syminf.flags & ScopeInfo.GLOBAL) != 0) {
+                if (syminf != null && (syminf.flags & ScopeInfo.NONLOCAL) != 0) {
+                    code.iconst(syminf.env_index);
+                    code.aload(temporary);
+                    code.invokevirtual(p(PyFrame.class), "setderef",
+                            sig(Void.TYPE, Integer.TYPE, PyObject.class));
+                } else if (syminf != null && (syminf.flags & ScopeInfo.GLOBAL) != 0) {
                     code.ldc(name);
                     code.aload(temporary);
                     code.invokevirtual(p(PyFrame.class), "setglobal",
@@ -2526,7 +2624,10 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                 return null;
             case Del: {
                 loadFrame();
-                if (syminf != null && (syminf.flags & ScopeInfo.GLOBAL) != 0) {
+                if (syminf != null && (syminf.flags & (ScopeInfo.CELL | ScopeInfo.NONLOCAL)) != 0) {
+                    code.iconst(syminf.env_index);
+                    code.invokevirtual(p(PyFrame.class), "delderef", sig(Void.TYPE, Integer.TYPE));
+                } else if (syminf != null && (syminf.flags & ScopeInfo.GLOBAL) != 0) {
                     code.ldc(name);
                     code.invokevirtual(p(PyFrame.class), "delglobal", sig(Void.TYPE, String.class));
                 } else {
@@ -2538,10 +2639,6 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                         if (syminf == null) {
                             throw new ParseException("internal compiler error", node);
                         }
-                        if ((syminf.flags & ScopeInfo.CELL) != 0) {
-                            module.error("can not delete variable '" + name
-                                    + "' referenced in nested scope", true, node);
-                        }
                         code.iconst(syminf.locals_index);
                         code.invokevirtual(p(PyFrame.class), "dellocal",
                                 sig(Void.TYPE, Integer.TYPE));
@@ -2550,6 +2647,32 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                 return null;
             }
         }
+        return null;
+    }
+
+    @Override
+    public Object visitJoinedStr(JoinedStr node) throws Exception {
+        int parts = makeArray(node.getInternalValues());
+        code.aload(parts);
+        code.invokestatic(p(FStringSupport.class), "join", sig(PyUnicode.class, PyObject[].class));
+        freeArrayRef(parts);
+        return null;
+    }
+
+    @Override
+    public Object visitFormattedValue(FormattedValue node) throws Exception {
+        setline(node);
+        visit(node.getInternalValue());
+        stackProduce();
+        if (node.getInternalFormat_spec() == null) {
+            module.unicodeConstant("").get(code);
+        } else {
+            visit(node.getInternalFormat_spec());
+        }
+        stackConsume();
+        code.iconst(node.getInternalConversion());
+        code.invokestatic(p(FStringSupport.class), "format",
+                sig(PyUnicode.class, PyObject.class, PyObject.class, Integer.TYPE));
         return null;
     }
 
@@ -2808,22 +2931,22 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         loadFrame();
         code.invokestatic(p(Py.class), "setException",
                 sig(PyException.class, Throwable.class, PyFrame.class));
+        int exception = code.getLocal(p(PyException.class));
+        code.astore(exception);
+        ExceptionContext context = beginExceptionContext(exception);
         code.aload(mgr_tmp);
-        code.swap();
         loadThreadState();
-        code.swap();
+        code.aload(exception);
         code.invokeinterface(Type.getType(ContextManager.class).getInternalName(),
                 __exit__.getName(), __exit__.getDescriptor(), true);
 
-        // # The exceptional case is handled here
-        // exc = False # implicit
-        // if not exit(*sys.exc_info()):
-        code.ifne(label_end);
-        // raise
-        // # The exception is swallowed if exit() returns true
-        code.invokestatic(p(Py.class), "makeException", sig(PyException.class));
-        code.checkcast(p(Throwable.class));
+        Label suppressed = new Label();
+        code.ifne(suppressed);
+        code.aload(exception);
         code.athrow();
+        code.label(suppressed);
+        endExceptionContext(context);
+        code.freeLocal(exception);
 
         code.label(label_end);
         code.freeLocal(mgr_tmp);
@@ -2835,6 +2958,65 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     @Override
     protected Object unhandled_node(PythonTree node) throws Exception {
         throw new Exception("Unhandled node " + node);
+    }
+
+    /** A synthetic finally restores handler state on every exit, including non-local gotos. */
+    private class ExceptionContext extends ExceptionHandler {
+        final int previous;
+
+        ExceptionContext(int previous) {
+            this.previous = previous;
+        }
+
+        @Override
+        public boolean isFinallyHandler() {
+            return true;
+        }
+
+        @Override
+        public void finalBody(CodeCompiler compiler) throws Exception {
+            loadFrame();
+            code.aload(previous);
+            code.invokestatic(p(Py.class), "popException",
+                    sig(Void.TYPE, PyFrame.class, PyException.class));
+        }
+    }
+
+    private ExceptionContext beginExceptionContext(int exception) throws Exception {
+        loadFrame();
+        code.aload(exception);
+        code.checkcast(p(PyException.class));
+        code.invokestatic(p(Py.class), "pushException",
+                sig(PyException.class, PyFrame.class, PyException.class));
+        int previous = code.getLocal(p(PyException.class));
+        code.astore(previous);
+        ExceptionContext context = new ExceptionContext(previous);
+        Label start = new Label();
+        code.label(start);
+        context.exceptionStarts.addElement(start);
+        exceptionHandlers.push(context);
+        return context;
+    }
+
+    private void endExceptionContext(ExceptionContext context) throws Exception {
+        Label end = new Label();
+        code.label(end);
+        context.exceptionEnds.addElement(end);
+        context.bodyDone = true;
+        exceptionHandlers.pop();
+        context.finalBody(this);
+        Label done = new Label();
+        code.goto_(done);
+        Label failed = new Label();
+        code.label(failed);
+        loadFrame();
+        code.aload(context.previous);
+        code.invokestatic(p(Py.class), "leaveException",
+                sig(PyException.class, Throwable.class, PyFrame.class, PyException.class));
+        code.athrow();
+        code.label(done);
+        context.addExceptionHandlers(failed);
+        code.freeLocal(context.previous);
     }
 
     /**

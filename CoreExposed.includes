@@ -158,6 +158,7 @@ org/python/antlr/ast/For.class
 org/python/antlr/ast/FunctionDef.class
 org/python/antlr/ast/GeneratorExp.class
 org/python/antlr/ast/Global.class
+org/python/antlr/ast/Nonlocal.class
 org/python/antlr/ast/If.class
 org/python/antlr/ast/IfExp.class
 org/python/antlr/ast/Import.class
@@ -180,6 +181,8 @@ org/python/antlr/ast/Set.class
 org/python/antlr/ast/SetComp.class
 org/python/antlr/ast/Slice.class
 org/python/antlr/ast/Str.class
+org/python/antlr/ast/JoinedStr.class
+org/python/antlr/ast/FormattedValue.class
 org/python/antlr/ast/Subscript.class
 org/python/antlr/ast/Suite.class
 org/python/antlr/ast/TryExcept.class

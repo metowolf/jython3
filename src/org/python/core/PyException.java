@@ -147,6 +147,24 @@ public class PyException extends RuntimeException implements Traverseproc
             }
         }
         normalized = true;
+        if (value instanceof PyBaseException) {
+            PyBaseException instance = (PyBaseException)value;
+            if (traceback == null && instance.getTraceback() instanceof PyTraceback) {
+                traceback = (PyTraceback)instance.getTraceback();
+            }
+            instance.setTraceback(traceback == null ? Py.None : traceback);
+            chainContext();
+        }
+    }
+
+    /** Bind an injected exception to the generator's handler, not its sender's handler. */
+    public PyException chainContext() {
+        PyException active = Py.getHandledException();
+        if (value instanceof PyBaseException && active != null
+                && active.value instanceof PyBaseException) {
+            ((PyBaseException)value).chainContext((PyBaseException)active.value);
+        }
+        return this;
     }
 
     /**
@@ -165,6 +183,7 @@ public class PyException extends RuntimeException implements Traverseproc
      * @param isFinally whether caller is a Python finally block
      */
     public void tracebackHere(PyFrame here, boolean isFinally) {
+        normalize();
         if (!isReRaise && here != null) {
             // the frame is either inapplicable or already registered (from a finally)
             // during a re-raise
@@ -173,6 +192,9 @@ public class PyException extends RuntimeException implements Traverseproc
         // finally blocks immediately tracebackHere: so they toggle isReRaise to skip the
         // next tracebackHere hook
         isReRaise = isFinally;
+        if (value instanceof PyBaseException) {
+            ((PyBaseException)value).setTraceback(traceback == null ? Py.None : traceback);
+        }
     }
 
     /**
@@ -186,10 +208,16 @@ public class PyException extends RuntimeException implements Traverseproc
      */
     public static PyException doRaise(PyObject type, PyObject value, PyObject traceback) {
         if (type == null) {
-            ThreadState state = Py.getThreadState();
-            type = state.exception.type;
-            value = state.exception.value;
-            traceback = state.exception.traceback;
+            PyException active = Py.getHandledException();
+            if (active == null) {
+                throw Py.RuntimeError("No active exception to reraise");
+            }
+            if (active.value instanceof PyBaseException) {
+                PyObject tb = ((PyBaseException)active.value).getTraceback();
+                active.traceback = tb instanceof PyTraceback ? (PyTraceback)tb : null;
+            }
+            active.isReRaise = true;
+            return active;
         }
 
         if (traceback == Py.None) {
@@ -236,7 +264,27 @@ public class PyException extends RuntimeException implements Traverseproc
             Py.DeprecationWarning("exceptions must derive from BaseException in 3.x");
         }
 
-        return new PyException(type, value, (PyTraceback)traceback);
+        PyException result = new PyException(type, value, (PyTraceback)traceback);
+        result.normalize();
+        return result;
+    }
+
+    /** Python 3 explicit chaining, separate from the legacy two-argument raise. */
+    public static PyException doRaiseFrom(PyObject exception, PyObject cause) {
+        if (!(exception instanceof PyBaseException)
+                && !(exception instanceof PyType
+                && ((PyType)exception).isSubType(PyBaseException.TYPE))) {
+            throw Py.TypeError("exceptions must derive from BaseException");
+        }
+        PyException result = doRaise(exception, null, null);
+        if (!(result.value instanceof PyBaseException)) {
+            throw Py.TypeError("exceptions must derive from BaseException");
+        }
+        if (cause instanceof PyType && ((PyType)cause).isSubType(PyBaseException.TYPE)) {
+            cause = cause.__call__();
+        }
+        ((PyBaseException)result.value).setCause(cause);
+        return result;
     }
 
     /**

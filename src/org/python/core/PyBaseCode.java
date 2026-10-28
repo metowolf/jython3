@@ -9,6 +9,8 @@ import com.google.common.base.CharMatcher;
 public abstract class PyBaseCode extends PyCode {
 
     public int co_argcount;
+    public int co_posonlyargcount;
+    public int co_kwonlyargcount;
     int nargs;
     public int co_firstlineno = -1;
     public String co_varnames[];
@@ -108,7 +110,7 @@ public abstract class PyBaseCode extends PyCode {
     public PyObject call(ThreadState state, PyObject globals, PyObject[] defaults,
                          PyObject closure)
     {
-        if (co_argcount != 0 || varargs || varkwargs) {
+        if (co_argcount != 0 || co_kwonlyargcount != 0 || varargs || varkwargs) {
             return call(state, Py.EmptyObjects, Py.NoKeywords, globals, defaults,
                         closure);
         }
@@ -122,7 +124,7 @@ public abstract class PyBaseCode extends PyCode {
     public PyObject call(ThreadState state, PyObject arg1, PyObject globals, PyObject[] defaults,
                          PyObject closure)
     {
-        if (co_argcount != 1 || varargs || varkwargs) {
+        if (co_argcount != 1 || co_kwonlyargcount != 0 || varargs || varkwargs) {
             return call(state, new PyObject[] {arg1},
                         Py.NoKeywords, globals, defaults, closure);
         }
@@ -137,7 +139,7 @@ public abstract class PyBaseCode extends PyCode {
     public PyObject call(ThreadState state, PyObject arg1, PyObject arg2, PyObject globals,
                          PyObject[] defaults, PyObject closure)
     {
-        if (co_argcount != 2 || varargs || varkwargs) {
+        if (co_argcount != 2 || co_kwonlyargcount != 0 || varargs || varkwargs) {
             return call(state, new PyObject[] {arg1, arg2},
                         Py.NoKeywords, globals, defaults, closure);
         }
@@ -154,7 +156,7 @@ public abstract class PyBaseCode extends PyCode {
                          PyObject globals, PyObject[] defaults,
                          PyObject closure)
     {
-        if (co_argcount != 3 || varargs || varkwargs) {
+        if (co_argcount != 3 || co_kwonlyargcount != 0 || varargs || varkwargs) {
             return call(state, new PyObject[] {arg1, arg2, arg3},
                         Py.NoKeywords, globals, defaults, closure);
         }
@@ -172,7 +174,7 @@ public abstract class PyBaseCode extends PyCode {
     public PyObject call(ThreadState state, PyObject arg1, PyObject arg2,
             PyObject arg3, PyObject arg4, PyObject globals,
             PyObject[] defaults, PyObject closure) {
-        if (co_argcount != 4 || varargs || varkwargs) {
+        if (co_argcount != 4 || co_kwonlyargcount != 0 || varargs || varkwargs) {
             return call(state, new PyObject[]{arg1, arg2, arg3, arg4},
                         Py.NoKeywords, globals, defaults, closure);
         }
@@ -199,17 +201,23 @@ public abstract class PyBaseCode extends PyCode {
 
     public PyObject call(ThreadState state, PyObject args[], String kws[], PyObject globals,
                          PyObject[] defs, PyObject closure) {
+        return call(state, args, kws, globals, defs, null, closure);
+    }
+
+    public PyObject call(ThreadState state, PyObject[] args, String[] kws, PyObject globals,
+                         PyObject[] defs, PyObject kwdefs, PyObject closure) {
         final PyFrame frame = new PyFrame(this, globals);
         final int argcount = args.length - kws.length;
+        final int namedargcount = co_argcount + co_kwonlyargcount;
 
-        if ((co_argcount > 0) || varargs || varkwargs) {
+        if (namedargcount > 0 || varargs || varkwargs) {
             int i;
             int n = argcount;
             PyObject kwdict = null;
             final PyObject[] fastlocals = frame.f_fastlocals;
             if (varkwargs) {
                 kwdict = new PyDictionary();
-                i = co_argcount;
+                i = namedargcount;
                 if (varargs) {
                     i++;
                 }
@@ -236,18 +244,18 @@ public abstract class PyBaseCode extends PyCode {
                 PyObject[] u = new PyObject[argcount - n];
                 System.arraycopy(args, n, u, 0, argcount - n);
                 PyObject uTuple = new PyTuple(u);
-                fastlocals[co_argcount] = uTuple;
+                fastlocals[namedargcount] = uTuple;
             }
             for (i = 0; i < kws.length; i++) {
                 String keyword = kws[i];
                 PyObject value = args[i + argcount];
                 int j;
-                for (j = 0; j < co_argcount; j++) {
+                for (j = co_posonlyargcount; j < namedargcount; j++) {
                     if (co_varnames[j].equals(keyword)) {
                         break;
                     }
                 }
-                if (j >= co_argcount) {
+                if (j >= namedargcount) {
                     if (kwdict == null) {
                         throw Py.TypeError(String.format(
                                 "%.200s() got an unexpected keyword argument '%.400s'",
@@ -298,6 +306,18 @@ public abstract class PyBaseCode extends PyCode {
         } else if ((argcount > 0) || (args.length > 0 && (co_argcount == 0 && !varargs && !varkwargs))) {
             throw Py.TypeError(String.format("%.200s() takes no arguments (%d given)",
                                              co_name, args.length));
+        }
+
+        for (int i = co_argcount; i < namedargcount; i++) {
+            if (frame.f_fastlocals[i] == null) {
+                PyObject value = kwdefs == null ? null : kwdefs.__finditem__(co_varnames[i]);
+                if (value == null) {
+                    throw Py.TypeError(String.format(
+                            "%.200s() missing required keyword-only argument: '%.400s'",
+                            co_name, co_varnames[i]));
+                }
+                frame.f_fastlocals[i] = value;
+            }
         }
 
         if (co_flags.isFlagSet(CodeFlag.CO_GENERATOR)) {

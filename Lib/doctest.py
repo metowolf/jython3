@@ -1309,7 +1309,7 @@ class DocTestRunner:
 
             # The example raised an exception:  check if it was expected.
             else:
-                exc_info = sys.exc_info()
+                exc_info = exception
                 exc_msg = traceback.format_exception_only(*exc_info[:2])[-1]
                 if not quiet:
                     got += _exception_traceback(exc_info)

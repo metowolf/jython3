@@ -21,6 +21,9 @@ public class PyFrame extends PyObject implements Traverseproc {
     @ExposedGet
     public PyFrame f_back;
 
+    /** Active handler in this frame; retained across generator suspension. */
+    public PyException handledException;
+
     /** The underyling code object. */
     @ExposedGet
     public PyBaseCode f_code;
@@ -347,13 +350,17 @@ public class PyFrame extends PyObject implements Traverseproc {
         if (obj != null) {
             return obj;
         }
-        String name;
         if (index >= f_ncells) {
-            name = f_code.co_freevars[index - f_ncells];
-        } else {
-            name = f_code.co_cellvars[index];
+            throw Py.NameError("free variable '" + f_code.co_freevars[index - f_ncells]
+                    + "' referenced before assignment in enclosing scope");
         }
-        throw Py.UnboundLocalError(String.format(UNBOUNDLOCAL_ERROR_MSG, name));
+        throw Py.UnboundLocalError(String.format(UNBOUNDLOCAL_ERROR_MSG,
+                f_code.co_cellvars[index]));
+    }
+
+    public void delderef(int index) {
+        getderef(index); // Validate before clearing: local and free cells have different errors.
+        f_env[index].ob_ref = null;
     }
 
     public void setderef(int index, PyObject value) {
@@ -369,6 +376,12 @@ public class PyFrame extends PyObject implements Traverseproc {
     @Override
     public int traverse(Visitproc visit, Object arg) {
         int retVal;
+        if (handledException != null) {
+            retVal = handledException.traverse(visit, arg);
+            if (retVal != 0) {
+                return retVal;
+            }
+        }
         if (f_back != null) {
             retVal = visit.visit(f_back, arg);
             if (retVal != 0) {
@@ -499,6 +512,9 @@ public class PyFrame extends PyObject implements Traverseproc {
             return true;
         }
 
+        if (handledException != null && handledException.refersDirectlyTo(ob)) {
+            return true;
+        }
         if (f_fastlocals != null) {
             for (PyObject obj: f_fastlocals) {
                 if (obj == ob) {

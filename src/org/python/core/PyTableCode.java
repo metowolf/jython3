@@ -55,8 +55,19 @@ public class PyTableCode extends PyBaseCode
         this.func_id = func_id;
     }
 
+    public PyTableCode(int argcount, String[] varnames, String filename, String name,
+            int firstlineno, boolean varargs, boolean varkwargs, PyFunctionTable funcs,
+            int func_id, String[] cellvars, String[] freevars, int npurecell,
+            int moreflags, int posonlyargcount, int kwonlyargcount) {
+        this(argcount, varnames, filename, name, firstlineno, varargs, varkwargs,
+                funcs, func_id, cellvars, freevars, npurecell, moreflags);
+        co_argcount -= kwonlyargcount;
+        co_posonlyargcount = posonlyargcount;
+        co_kwonlyargcount = kwonlyargcount;
+    }
+
     private static final String[] __members__ = {
-        "co_name", "co_argcount",
+        "co_name", "co_argcount", "co_posonlyargcount", "co_kwonlyargcount",
         "co_varnames", "co_filename", "co_firstlineno",
         "co_flags","co_cellvars","co_freevars","co_nlocals"
         // not supported: co_code, co_consts, co_names,
@@ -155,6 +166,7 @@ public class PyTableCode extends PyBaseCode
         frame.setupEnv((PyTuple)closure);
 
         ts.frame = frame;
+        ts.exception = Py.getHandledException();
 
         // Handle trace function for debugging
         if (ts.tracefunc != null) {

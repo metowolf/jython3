@@ -19,6 +19,7 @@ import org.python.antlr.ast.For;
 import org.python.antlr.ast.FunctionDef;
 import org.python.antlr.ast.GeneratorExp;
 import org.python.antlr.ast.IfExp;
+import org.python.antlr.ast.JoinedStr;
 import org.python.antlr.ast.Index;
 import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.ListComp;
@@ -290,7 +291,8 @@ public class GrammarActions {
         return new TryFinally(t, b, f);
     }
 
-    stmt makeFuncdef(Token t, Token nameToken, arguments args, List funcStatements, List decorators) {
+    stmt makeFuncdef(Token t, Token nameToken, arguments args, List funcStatements,
+            List decorators, expr returns) {
         if (nameToken == null) {
             return errorHandler.errorStmt(new PythonTree(t));
         }
@@ -303,7 +305,7 @@ public class GrammarActions {
         }
         List<stmt> s = castStmts(funcStatements);
         List<expr> d = castExprs(decorators);
-        return new FunctionDef(t, n, a, s, d);
+        return new FunctionDef(t, n, a, s, d, returns);
     }
 
     List<expr> makeAssignTargets(expr lhs, List rhs) {
@@ -456,6 +458,36 @@ public class GrammarActions {
         boolean isUnicode() {
             return unicode;
         }
+    }
+
+    expr extractStringExpressions(List<?> tokens, String encoding, boolean printFunction,
+            boolean unicodeLiterals) {
+        boolean formatted = false;
+        for (Object item : tokens) {
+            formatted |= FStringParser.isFormatted(((Token)item).getText());
+        }
+        if (!formatted) {
+            return new Str((Token)tokens.get(0), extractStrings(tokens, encoding, unicodeLiterals));
+        }
+        List<expr> values = new ArrayList<expr>();
+        for (Object item : tokens) {
+            Token token = (Token)item;
+            String text = token.getText();
+            if (FStringParser.isFormatted(text)) {
+                values.addAll(new FStringParser(token, encoding, printFunction, unicodeLiterals)
+                        .parse().getInternalValues());
+            } else {
+                String prefix = text.substring(0, FStringParser.prefixLength(text));
+                if (prefix.toLowerCase(java.util.Locale.ROOT).contains("b")) {
+                    throw new ParseException("cannot mix bytes and f-string literals",
+                            new PythonTree(token), true);
+                }
+                PyUnicode part = new FStringParser(token, encoding, printFunction, unicodeLiterals)
+                        .literal();
+                values.add(new Str(token, part));
+            }
+        }
+        return new JoinedStr((Token)tokens.get(0), values);
     }
 
     PyString extractStrings(List s, String encoding, boolean unicodeLiterals) {
@@ -618,7 +650,7 @@ public class GrammarActions {
             errorHandler.error("can't assign to generator expression", e);
         } else if (e instanceof Num) {
             errorHandler.error("can't assign to number", e);
-        } else if (e instanceof Str) {
+        } else if (e instanceof Str || e instanceof JoinedStr) {
             errorHandler.error("can't assign to string", e);
         } else if (e instanceof Yield) {
             errorHandler.error("can't assign to yield expression", e);
@@ -685,7 +717,7 @@ public class GrammarActions {
             errorHandler.error("can't delete function call", e);
         } else if (e instanceof Num) {
             errorHandler.error("can't delete number", e);
-        } else if (e instanceof Str) {
+        } else if (e instanceof Str || e instanceof JoinedStr) {
             errorHandler.error("can't delete string", e);
         } else if (e instanceof Tuple) {
             //XXX: performance problem?  Any way to do this better?

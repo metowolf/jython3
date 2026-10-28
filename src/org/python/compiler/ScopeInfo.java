@@ -90,6 +90,37 @@ public class ScopeInfo extends Object implements ScopeConstants {
     public Map<String, SymInfo> tbl = new LinkedHashMap<String, SymInfo>();
     public Vector<String> names = new Vector<String>();
 
+    private final Map<String, PythonTree> nonlocals = new LinkedHashMap<String, PythonTree>();
+
+    public void addNonlocal(String name, PythonTree node) {
+        tbl.put(name, new SymInfo(NONLOCAL | FREE));
+        nonlocals.put(name, node);
+    }
+
+    public void validateNonlocals(CompilationContext ctxt) throws Exception {
+        for (Map.Entry<String, PythonTree> entry : nonlocals.entrySet()) {
+            String name = entry.getKey();
+            boolean bound = false;
+            // up skips class namespaces, just as closure construction does.
+            for (ScopeInfo enclosing = up; enclosing != null && enclosing.kind != TOPSCOPE;
+                    enclosing = enclosing.up) {
+                SymInfo info = enclosing.tbl.get(name);
+                if (info != null) {
+                    if ((info.flags & NGLOBAL) != 0) {
+                        break;
+                    }
+                    if ((info.flags & BOUND) != 0 && (info.flags & NONLOCAL) == 0) {
+                        bound = true;
+                        break;
+                    }
+                }
+            }
+            if (!bound) {
+                ctxt.error("no binding for nonlocal '" + name + "' found", true, entry.getValue());
+            }
+        }
+    }
+
     public int addGlobal(String name) {
         // global kind = func vs. class
         int global = kind == CLASSSCOPE ? CLASS_GLOBAL : NGLOBAL;
@@ -123,13 +154,19 @@ public class ScopeInfo extends Object implements ScopeConstants {
             tbl.put(name, new SymInfo(BOUND));
             return;
         }
-        info.flags |= BOUND;
+        if ((info.flags & NONLOCAL) == 0) {
+            info.flags |= BOUND;
+        } else {
+            info.flags |= NONLOCAL_ASSIGNED;
+        }
     }
 
     public void addUsed(String name) {
-        if (tbl.get(name) == null) {
+        SymInfo info = tbl.get(name);
+        if (info == null) {
             tbl.put(name, new SymInfo(0));
-            return;
+        } else if ((info.flags & NONLOCAL) != 0) {
+            info.flags |= NONLOCAL_USED;
         }
     }
 

@@ -27,6 +27,93 @@ public class PyBaseException extends PyObject implements Traverseproc {
     /** Exception's underlying dictionary, lazily created. */
     public PyObject __dict__;
 
+    private PyObject cause = Py.None;
+    private PyObject context = Py.None;
+    private PyObject traceback = Py.None;
+    private boolean suppressContext;
+
+    @ExposedGet(name = "__cause__")
+    public PyObject getCause() {
+        return cause;
+    }
+
+    @ExposedSet(name = "__cause__")
+    public void setCause(PyObject value) {
+        checkExceptionLink(value, "exception cause");
+        cause = value;
+        suppressContext = true;
+    }
+
+    @ExposedGet(name = "__context__")
+    public PyObject getContext() {
+        return context;
+    }
+
+    @ExposedSet(name = "__context__")
+    public void setContext(PyObject value) {
+        checkExceptionLink(value, "exception context");
+        context = value;
+    }
+
+    private static void checkExceptionLink(PyObject value, String name) {
+        if (value != Py.None && !(value instanceof PyBaseException)) {
+            throw Py.TypeError(name + " must be None or derive from BaseException");
+        }
+    }
+
+    @ExposedGet(name = "__suppress_context__")
+    public PyObject getSuppressContext() {
+        return Py.newBoolean(suppressContext);
+    }
+
+    @ExposedSet(name = "__suppress_context__")
+    public void setSuppressContext(PyObject value) {
+        if (!(value instanceof PyBoolean)) {
+            throw Py.TypeError("attribute value type must be bool");
+        }
+        suppressContext = value.__nonzero__();
+    }
+
+    @ExposedGet(name = "__traceback__")
+    public PyObject getTraceback() {
+        return traceback;
+    }
+
+    @ExposedSet(name = "__traceback__")
+    public void setTraceback(PyObject value) {
+        if (value != Py.None && !(value instanceof PyTraceback)) {
+            throw Py.TypeError("__traceback__ must be a traceback or None");
+        }
+        traceback = value;
+    }
+
+    @ExposedMethod(names = "with_traceback")
+    public PyObject BaseException_with_traceback(PyObject value) {
+        setTraceback(value);
+        return this;
+    }
+
+    /** Attach the active exception without introducing an implicit context cycle. */
+    void chainContext(PyBaseException active) {
+        if (active == this) {
+            return;
+        }
+        java.util.Set<PyObject> seen = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<PyObject, Boolean>());
+        PyBaseException cursor = active;
+        while (seen.add(cursor)) {
+            if (cursor.context == this) {
+                cursor.context = Py.None;
+                break;
+            }
+            if (!(cursor.context instanceof PyBaseException)) {
+                break;
+            }
+            cursor = (PyBaseException)cursor.context;
+        }
+        context = active;
+    }
+
     public PyBaseException() {
         super();
     }
@@ -112,6 +199,10 @@ public class PyBaseException extends PyObject implements Traverseproc {
     }
 
     final PyObject BaseException___findattr__(String name) {
+        if (name.equals("__cause__") || name.equals("__context__")
+                || name.equals("__traceback__") || name.equals("__suppress_context__")) {
+            return super.__findattr_ex__(name);
+        }
         if (__dict__ != null) {
             PyObject attr = __dict__.__finditem__(name);
             if (attr != null) {
@@ -280,11 +371,20 @@ public class PyBaseException extends PyObject implements Traverseproc {
                 return retValue;
             }
         }
+        for (PyObject link : new PyObject[] {cause, context, traceback}) {
+            if (link != Py.None) {
+                retValue = visit.visit(link, arg);
+                if (retValue != 0) {
+                    return retValue;
+                }
+            }
+        }
         return __dict__ != null ? visit.visit(__dict__, arg) : 0;
     }
 
     @Override
     public boolean refersDirectlyTo(PyObject ob) {
-        return ob != null && (ob == message || ob == args || ob == __dict__);
+        return ob != null && (ob == message || ob == args || ob == __dict__
+                || ob == cause || ob == context || ob == traceback);
     }
 }

@@ -125,6 +125,7 @@ import org.python.antlr.ast.ListComp;
 import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.Module;
 import org.python.antlr.ast.Name;
+import org.python.antlr.ast.Nonlocal;
 import org.python.antlr.ast.Num;
 import org.python.antlr.ast.operatorType;
 import org.python.antlr.ast.Pass;
@@ -303,6 +304,11 @@ private ErrorHandler errorHandler;
     }
 
     @Override
+    public void reportError(RecognitionException e) {
+        errorHandler.reportError(this, e);
+    }
+
+    @Override
     public void displayRecognitionError(String[] tokenNames, RecognitionException e) {
         //Do nothing. We will handle error display elsewhere.
     }
@@ -449,6 +455,7 @@ attr
     | FROM
     | FOR
     | GLOBAL
+    | NONLOCAL
     | IF
     | IMPORT
     | IN
@@ -511,13 +518,14 @@ funcdef
 @after {
     $funcdef.tree = stype;
 }
-    : decorators? DEF name_or_print parameters COLON suite[false]
+    : decorators? DEF name_or_print parameters (RARROW r=test[expr_contextType.Load])? COLON suite[false]
     {
         Token t = $DEF;
         if ($decorators.start != null) {
             t = $decorators.start;
         }
-        stype = actions.makeFuncdef(t, $name_or_print.start, $parameters.args, $suite.stypes, $decorators.etypes);
+        stype = actions.makeFuncdef(t, $name_or_print.start, $parameters.args, $suite.stypes,
+                $decorators.etypes, actions.castExpr($r.tree));
     }
     ;
 
@@ -525,7 +533,7 @@ funcdef
 parameters
     returns [arguments args]
     : LPAREN
-      (varargslist
+      (varargslist[true]
         {
               $args = $varargslist.args;
         }
@@ -537,48 +545,38 @@ parameters
       RPAREN
     ;
 
-//not in CPython's Grammar file
-defparameter
-    [List defaults] returns [expr etype]
-@after {
-   $defparameter.tree = $etype;
+// Function annotations are deliberately disabled for lambda parameters.
+varargslist[boolean allowAnnotations]
+    returns [arguments args]
+@init {
+    ParameterList params = new ParameterList(input.LT(1));
 }
-    : fpdef[expr_contextType.Param] (ASSIGN test[expr_contextType.Load])?
+    : parameter[params, allowAnnotations]
+      (options {greedy=true;}: COMMA parameter[params, allowAnnotations])* COMMA?
       {
-          $etype = actions.castExpr($fpdef.tree);
-          if ($ASSIGN != null) {
-              defaults.add($test.tree);
-          } else if (!defaults.isEmpty()) {
-              throw new ParseException("non-default argument follows default argument",
-                  $fpdef.tree, true);
-          }
+          $args = params.finish();
       }
     ;
 
-//varargslist: ((fpdef ['=' test] ',')*
-//              ('*' NAME [',' '**' NAME] | '**' NAME) |
-//              fpdef ['=' test] (',' fpdef ['=' test])* [','])
-varargslist
-    returns [arguments args]
-@init {
-    List defaults = new ArrayList();
-}
-    : d+=defparameter[defaults] (options {greedy=true;}:COMMA d+=defparameter[defaults])*
-      (COMMA
-          (STAR starargs=NAME (COMMA DOUBLESTAR kwargs=NAME)?
-          | DOUBLESTAR kwargs=NAME
-          )?
-      )?
+parameter[ParameterList params, boolean allowAnnotations]
+    : fpdef[expr_contextType.Param]
+      ({allowAnnotations}? => COLON a=test[expr_contextType.Load])?
+      (ASSIGN d=test[expr_contextType.Load])?
       {
-          $args = actions.makeArgumentsType($varargslist.start, $d, $starargs, $kwargs, defaults);
+          params.add(actions.castExpr($fpdef.tree), actions.castExpr($a.tree),
+                  actions.castExpr($d.tree));
       }
-    | STAR starargs=NAME (COMMA DOUBLESTAR kwargs=NAME)?
+    | STAR (s=NAME ({allowAnnotations}? => COLON sa=test[expr_contextType.Load])?)?
       {
-          $args = actions.makeArgumentsType($varargslist.start, $d, $starargs, $kwargs, defaults);
+          params.addStar($STAR, $s, actions.castExpr($sa.tree));
       }
-    | DOUBLESTAR kwargs=NAME
+    | DOUBLESTAR k=NAME ({allowAnnotations}? => COLON ka=test[expr_contextType.Load])?
       {
-          $args = actions.makeArgumentsType($varargslist.start, $d, null, $kwargs, defaults);
+          params.addKwarg($DOUBLESTAR, $k, actions.castExpr($ka.tree));
+      }
+    | SLASH
+      {
+          params.positionalOnly($SLASH);
       }
     ;
 
@@ -645,6 +643,7 @@ small_stmt : expr_stmt
            | flow_stmt
            | import_stmt
            | global_stmt
+           | nonlocal_stmt
            | exec_stmt
            | assert_stmt
            | {!printFunction}? => print_stmt
@@ -928,10 +927,13 @@ raise_stmt
 @after {
    $raise_stmt.tree = stype;
 }
-    : RAISE (t1=test[expr_contextType.Load] (COMMA t2=test[expr_contextType.Load]
-        (COMMA t3=test[expr_contextType.Load])?)?)?
+    : RAISE (t1=test[expr_contextType.Load]
+        (FROM cause=test[expr_contextType.Load]
+        | COMMA t2=test[expr_contextType.Load]
+          (COMMA t3=test[expr_contextType.Load])?)?)?
       {
-          stype = new Raise($RAISE, actions.castExpr($t1.tree), actions.castExpr($t2.tree), actions.castExpr($t3.tree));
+          stype = new Raise($RAISE, actions.castExpr($t1.tree), actions.castExpr($t2.tree),
+                  actions.castExpr($t3.tree), actions.castExpr($cause.tree));
       }
     ;
 
@@ -1075,6 +1077,20 @@ global_stmt
     : GLOBAL n=NAME {names.add($n);} (COMMA n=NAME {names.add($n);})*
       {
           stype = new Global($GLOBAL, actions.makeNames(names), actions.makeNameNodes(names));
+      }
+    ;
+
+nonlocal_stmt
+@init {
+    stmt stype = null;
+    List<Token> names = new ArrayList<>();
+}
+@after {
+    $nonlocal_stmt.tree = stype;
+}
+    : NONLOCAL n=NAME {names.add($n);} (COMMA n=NAME {names.add($n);})*
+      {
+          stype = new Nonlocal($NONLOCAL, actions.makeNames(names));
       }
     ;
 
@@ -1804,7 +1820,7 @@ atom
        }
      | (S+=STRING)+
        {
-           etype = new Str(actions.extractStringToken($S), actions.extractStrings($S, encoding, unicodeLiterals));
+           etype = actions.extractStringExpressions($S, encoding, printFunction, unicodeLiterals);
        }
      ;
 
@@ -1871,7 +1887,7 @@ lambdef
 @after {
     $lambdef.tree = etype;
 }
-    : LAMBDA (varargslist)? COLON test[expr_contextType.Load]
+    : LAMBDA (varargslist[false])? COLON test[expr_contextType.Load]
       {
           arguments a = $varargslist.args;
           if (a == null) {
@@ -2262,6 +2278,7 @@ FINALLY   : 'finally' ;
 FROM      : 'from' ;
 FOR       : 'for' ;
 GLOBAL    : 'global' ;
+NONLOCAL  : 'nonlocal' ;
 IF        : 'if' ;
 IMPORT    : 'import' ;
 IN        : 'in' ;
@@ -2294,6 +2311,8 @@ SEMI    : ';' ;
 PLUS    : '+' ;
 
 MINUS    : '-' ;
+
+RARROW    : '->' ;
 
 STAR    : '*' ;
 
@@ -2415,13 +2434,14 @@ NAME:    ( 'a' .. 'z' | 'A' .. 'Z' | '_')
  *  should make us exit loop not continue.
  */
 STRING
-    :   ('r'|'u'|'b'|'ur'|'br'|'R'|'U'|'B'|'UR'|'BR'|'uR'|'Ur'|'Br'|'bR')?
+    :   ('r'|'u'|'b'|'ur'|'br'|'R'|'U'|'B'|'UR'|'BR'|'uR'|'Ur'|'Br'|'bR'|'f'|'F'|'fr'|'fR'|'Fr'|'FR'|'rf'|'rF'|'Rf'|'RF')?
         (   '\'\'\'' (options {greedy=false;}:TRIAPOS)* '\'\'\''
         |   '"""' (options {greedy=false;}:TRIQUOTE)* '"""'
         |   '"' (ESC|~('\\'|'\n'|'"'))* '"'
         |   '\'' (ESC|~('\\'|'\n'|'\''))* '\''
         ) {
-           if (state.tokenStartLine != input.getLine()) {
+           if (state.tokenStartLine != input.getLine()
+                   && !FStringParser.isFormatted(getText())) {
                state.tokenStartLine = input.getLine();
                state.tokenStartCharPositionInLine = -2;
            }

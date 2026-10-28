@@ -27,6 +27,7 @@ public abstract class stmt extends PythonTree {
     }
 
     public stmt(PyType subType) {
+        super(subType);
     }
 
     public stmt(int ttype, Token token) {

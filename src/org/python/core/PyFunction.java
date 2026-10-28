@@ -39,6 +39,10 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
      */
     public PyObject[] __defaults__;
 
+    /** Keyword-only defaults and eagerly evaluated annotations. */
+    private PyObject kwDefaults;
+    private PyObject annotations;
+
     /** The actual function's code, writable. */
     @ExposedGet
     public PyCode __code__;
@@ -216,6 +220,49 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
     @ExposedDelete(name = "__defaults__")
     public void delDefaults() {
         __defaults__ = null;
+    }
+
+    @ExposedGet(name = "__kwdefaults__")
+    public PyObject getKwDefaults() {
+        return kwDefaults == null ? Py.None : kwDefaults;
+    }
+
+    @ExposedSet(name = "__kwdefaults__")
+    public void setKwDefaults(PyObject value) {
+        if (value != Py.None && !(value instanceof PyDictionary)) {
+            throw Py.TypeError("__kwdefaults__ must be set to a dict object");
+        }
+        kwDefaults = value == Py.None ? null : value;
+    }
+
+    @ExposedDelete(name = "__kwdefaults__")
+    public void delKwDefaults() {
+        kwDefaults = null;
+    }
+
+    @ExposedGet(name = "__annotations__")
+    public PyObject getAnnotations() {
+        if (annotations == null) {
+            annotations = new PyDictionary();
+        }
+        return annotations;
+    }
+
+    @ExposedSet(name = "__annotations__")
+    public void setAnnotations(PyObject value) {
+        if (value != Py.None && !(value instanceof PyDictionary)) {
+            throw Py.TypeError("__annotations__ must be set to a dict object");
+        }
+        annotations = value == Py.None ? null : value;
+    }
+
+    @ExposedDelete(name = "__annotations__")
+    public void delAnnotations() {
+        annotations = null;
+    }
+
+    private boolean hasKeywordOnlyArgs() {
+        return __code__ instanceof PyBaseCode && ((PyBaseCode) __code__).co_kwonlyargcount != 0;
     }
 
     @Deprecated
@@ -403,6 +450,9 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
 
     @Override
     public PyObject __call__(ThreadState state) {
+        if (hasKeywordOnlyArgs()) {
+            return function___call__(state, Py.EmptyObjects, Py.NoKeywords);
+        }
         return __code__.call(state, __globals__, __defaults__, __closure__);
     }
 
@@ -413,6 +463,9 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
 
     @Override
     public PyObject __call__(ThreadState state, PyObject arg0) {
+        if (hasKeywordOnlyArgs()) {
+            return function___call__(state, new PyObject[] {arg0}, Py.NoKeywords);
+        }
         return __code__.call(state, arg0, __globals__, __defaults__, __closure__);
     }
 
@@ -423,6 +476,9 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
 
     @Override
     public PyObject __call__(ThreadState state, PyObject arg0, PyObject arg1) {
+        if (hasKeywordOnlyArgs()) {
+            return function___call__(state, new PyObject[] {arg0, arg1}, Py.NoKeywords);
+        }
         return __code__.call(state, arg0, arg1, __globals__, __defaults__, __closure__);
     }
 
@@ -434,6 +490,9 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
     @Override
     public PyObject __call__(ThreadState state, PyObject arg0, PyObject arg1,
             PyObject arg2) {
+        if (hasKeywordOnlyArgs()) {
+            return function___call__(state, new PyObject[] {arg0, arg1, arg2}, Py.NoKeywords);
+        }
         return __code__.call(state, arg0, arg1, arg2, __globals__, __defaults__, __closure__);
     }
 
@@ -446,6 +505,9 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
     @Override
     public PyObject __call__(ThreadState state, PyObject arg0, PyObject arg1,
             PyObject arg2, PyObject arg3) {
+        if (hasKeywordOnlyArgs()) {
+            return function___call__(state, new PyObject[] {arg0, arg1, arg2, arg3}, Py.NoKeywords);
+        }
         return __code__.call(state, arg0, arg1, arg2, arg3, __globals__, __defaults__, __closure__);
     }
 
@@ -471,6 +533,10 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
 
     @ExposedMethod(doc = BuiltinDocs.function___call___doc)
     final PyObject function___call__(ThreadState state, PyObject[] args, String[] keywords) {
+        if (hasKeywordOnlyArgs()) {
+            return ((PyBaseCode) __code__).call(state, args, keywords, __globals__,
+                    __defaults__, kwDefaults, __closure__);
+        }
         return __code__.call(state, args, keywords, __globals__, __defaults__, __closure__);
     }
 
@@ -482,6 +548,12 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
     @Override
     public PyObject __call__(ThreadState state, PyObject arg1, PyObject[] args,
                              String[] keywords) {
+        if (hasKeywordOnlyArgs()) {
+            PyObject[] allArgs = new PyObject[args.length + 1];
+            allArgs[0] = arg1;
+            System.arraycopy(args, 0, allArgs, 1, args.length);
+            return function___call__(state, allArgs, keywords);
+        }
         return __code__.call(state, arg1, args, keywords, __globals__, __defaults__, __closure__);
     }
 
@@ -595,6 +667,18 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
                 }
             }
         }
+        if (kwDefaults != null) {
+            retVal = visit.visit(kwDefaults, arg);
+            if (retVal != 0) {
+                return retVal;
+            }
+        }
+        if (annotations != null) {
+            retVal = visit.visit(annotations, arg);
+            if (retVal != 0) {
+                return retVal;
+            }
+        }
         //__doc__ cannot be null
         retVal = visit.visit(__doc__, arg);
         if (retVal != 0) {
@@ -627,6 +711,7 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
             }
         }
         return ob == __doc__ || ob == __globals__ || ob == __code__
-            || ob == __dict__ || ob == __closure__ || ob == __module__;
+            || ob == __dict__ || ob == __closure__ || ob == __module__
+            || ob == kwDefaults || ob == annotations;
     }
 }
