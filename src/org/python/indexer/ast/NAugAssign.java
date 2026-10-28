@@ -30,7 +30,8 @@ public class NAugAssign extends NNode {
     @Override
     public NType resolve(Scope s) throws Exception {
         resolveExpr(target, s);
-        return setType(resolveExpr(value, s));
+        NType rhs = resolveExpr(value, s);
+        return setType("@".equals(op) ? new org.python.indexer.types.NUnknownType() : rhs);
     }
 
     @Override

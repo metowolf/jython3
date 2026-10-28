@@ -6,7 +6,7 @@ The native JVM migration target is **Python 3.15.2**, retaining Java
 interoperability. That goal is **not complete**. This working tree implements
 native function-syntax, nonlocal-scope, exception-chaining, f-string,
 extended iterable-unpacking, mapping-display unpacking, generalized
-call-unpacking, iterable class-base, and expression-decorator stages on the
+call-unpacking, iterable class-base, expression-decorator, and matrix-operator stages on the
 existing Jython 2.7 runtime. It is not Jython 3, is not a Python 3 compatibility
 mode, and does not make arbitrary Python 3 packages runnable.
 
@@ -463,12 +463,13 @@ Class index AST serialization is versioned to reject old caches that omit those
 lists; the existing cache loader reparses source. Decorator replacement/type
 inference and complete modern-expression support in the indexer are not claimed.
 
-This does not implement assignment expressions, matrix multiplication,
+The decorator stage did not implement matrix multiplication; the following
+stage adds it, including inside decorators. Assignment expressions,
 `async`/`await`, `yield from`, modern comprehension scopes, deferred annotations
-or the full Python 3 object model. These limits also apply inside decorators.
-It is a syntax migration, not full PEP 614 support for every modern expression.
-No runtime ABI or native AST layout change is needed: compiled-module API stays
-**46**.
+and the full Python 3 object model remain outstanding, including inside
+decorators. This is not full PEP 614 support for every modern expression.
+The decorator stage needed no runtime ABI or native AST layout change and kept
+compiled-module API **46**; the matrix stage below advances it to **47**.
 
 All 39 new native Python cases passed. On CPython 3.15.2, 33 shared cases passed
 and 6 JVM-specific cases were skipped. Standard and fresh builds passed all 42
@@ -480,13 +481,82 @@ passed 125 cases including the indexer, but does not establish that failure as
 fixed. See [decorator validation](Doc/native-decorators-validation.md) for
 commands, classpath differences and remaining boundaries.
 
+## Implemented matrix operators
+
+PEP 465's `@` and `@=` now compile directly to JVM calls to `MatmulSupport`.
+They do not translate source or forward execution to the optional CPython backend.
+`@` has multiplication-level precedence and is left-associative:
+
+```python
+class Matrix(object):
+    def __init__(self, label):
+        self.label = label
+
+    def __matmul__(self, other):
+        return Matrix((self.label, other.label))
+
+value = Matrix('a') @ Matrix('b')
+value @= Matrix('c')
+assert value.label == (('a', 'b'), 'c')
+```
+
+Special methods are looked up on operand classes and bound as descriptors.
+`__matmul__`, `__rmatmul__` and `__imatmul__` support `NotImplemented` fallback,
+right-subclass reflected priority and arbitrary replacement results. Same-type
+operands do not retry the reflected method; a prioritized reflected attempt is
+not repeated. Class-level descriptor binding and comparison determine reflected
+priority, including static/class methods and legacy unbound-method aliases.
+Exceptions propagate without fallback. `@=` falls back to the full binary
+protocol if the in-place method is absent or returns `NotImplemented`.
+
+Targets are evaluated once and assigned only after successful dispatch. Names,
+attributes, subscripts, slices, closures and generator suspension use native
+compiler machinery. Typed operand/target locals remain visible to frame GC
+traversal. Augmented attribute temporaries now record the attribute name as a
+Java String and object locals as JVM internal names, fixing invalid suspended
+frame bytecode; legacy `+=` suspension is also exercised.
+
+`ast.MatMult`, AST compilation and subclassing, interactive parsing, `tokenize`,
+and `operator.matmul`/`operator.imatmul` plus their dunder aliases are included.
+Hand-built Store targets compile through private AugStore copies without
+mutating the supplied AST. Scope checks reject missing operands, invalid root
+contexts and invalid augmented targets, but do not recursively modernize all
+legacy AST validation. The indexer preserves both operand references and `@`,
+and uses an unknown result type instead of scalar-promotion heuristics.
+
+ASDL/enum/adapter value **13** is appended without renumbering old operators.
+`token.ATEQUAL` is appended at **53** while old token numbers remain unchanged;
+this is not CPython 3.15's token numbering or its complete AST layout. The new
+operator's integer exposure avoids recursive derived-class dispatch; the AST
+source generator is updated but old operators are not broadly regenerated.
+ANTLR regeneration now invalidates the three classes that inline lexer/parser
+token constants, so incremental builds do not silently retain old numbers.
+
+All **45** new native Python cases passed. The exact CPython 3.15.2 comparison
+passed **40** shared cases and skipped **5** native-only cases. Standard and
+independent fresh JAR-based Java runs passed **133** cases, including six new
+native interoperability, ThreadState, AST and GC tests and two new indexer cases.
+The fresh native run passed all 45 cases and its six-module regression passed.
+The final broad native regression selected **50** modules: **49 passed**, with
+only the existing `test_descr` skip. Two complete Java driver runs reported
+**34,880** cases, no failures or timeouts; 58 of 59 classes passed and one had no
+cases. The prior indexer failure did not recur, but its historical root cause
+has not been isolated. See [matrix validation](Doc/native-matmul-validation.md)
+for commands, implementation fixes and boundaries. Earlier stage counts above
+remain historical results, not substitutes for this stage's regression.
+
+There is no built-in matrix container or numerical matrix algorithm. Integers,
+lists and Java arrays do not acquire matrix arithmetic automatically. NumPy,
+Python 3 scalar arithmetic and the complete Python 3.15.2 runtime/library remain
+out of scope. Compiled-module API is now **47**, not a language-version claim.
+
 ## Build and test
 
 From the repository root, with a JDK and Apache Ant installed:
 
 ```sh
 ant jar copy-dev compile-test jar-test
-java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest org.python.core.DecoratorExpressionTest
+java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest org.python.core.DecoratorExpressionTest org.python.core.MatmulTest
 ```
 
 The classpath separator above is for Linux/macOS; use `;` on Windows. In the
@@ -507,10 +577,11 @@ Java test classes must be on the classpath for `test_exceptions_jy` as well.
 Run the related Python regression set with:
 
 ```sh
-java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_decorator_expressions test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
+java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_matmul test_operator test_tokenize test_augassign test_python3_decorator_expressions test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
 ```
 
-This selects 46 modules, including expression decorators and the class/GC set.
+This selects 50 modules, adding matrix operators, operator, tokenizer and
+augmented-assignment coverage to the prior 46-module class/GC set.
 The legacy `test_descr` module is currently skipped because it imports removed
 `test.test_support.verify`/`vereq` helpers; it is already listed in the existing
 Jython skip expectations. It must not be counted as a passing module. Run
@@ -594,12 +665,13 @@ Parameter slots are positional-only, positional-or-keyword, keyword-only,
 optional `*args`, then optional `**kwargs`. Old Java code factories remain
 available; a new overload carries the additional parameter counts.
 
-The compiled-module API version is now **46**: stage 40 introduced function
+The compiled-module API version is now **47**: stage 40 introduced function
 metadata and setters; stage 41 introduced closure deletion and exception-state
 helpers; stage 42 added f-string runtime helpers; stage 43 added iterable
 unpacking helpers; stage 44 added mapping-display merging helpers; stage 45
 added the generalized call accumulator and invocation helpers; stage 46
-invalidates caches for the new class-base parsing and decorator evaluation order.
+invalidates caches for the new class-base parsing and decorator evaluation order;
+stage 47 adds the native matrix-dispatch entry points.
 This is a bytecode/cache compatibility number, not a Python language version.
 Rebuild compiled-only modules and regenerate source-backed `$py.class` caches.
 Do not bypass API checks to exchange caches with an older runtime.
@@ -611,7 +683,7 @@ the native path must meet it without forwarding execution to CPython. Full
 version-specific acceptance tests remain to be established. Outstanding work
 includes:
 
-- `yield from`, class-header keywords and mapping expansion, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, matrix multiplication, and Python 3.12 PEP 701 f-string extensions.
+- `yield from`, class-header keywords and mapping expansion, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, and Python 3.12 PEP 701 f-string extensions.
 - Pattern matching, exception groups, type parameters, deferred annotation semantics, and the other language/library changes through Python 3.15.2.
 - Removal or isolation of Python 2-only syntax such as tuple parameters, `print`/`exec` statements, backticks, and old exception forms.
 - Python 3 string/bytes, integer and division, iteration, import, class/metaclass, exception, and comprehension semantics.

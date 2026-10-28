@@ -162,10 +162,18 @@ class TestDecorators(unittest.TestCase):
             else:
                 self.assertRaises(SyntaxError, compile, codestr, "test", "exec")
 
-        # You can't put multiple decorators on a single line:
-        #
-        self.assertRaises(SyntaxError, compile,
-                          "@f1 @f2\ndef f(): pass", "test", "exec")
+        # This is one matrix expression now, not two decorators on one line.
+        source = "@f1 @f2\ndef f(): pass"
+        if test_support.is_jython:
+            import ast
+            tree = ast.parse(source)
+            self.assertEqual(len(tree.body[0].decorator_list), 1)
+            self.assertIsInstance(tree.body[0].decorator_list[0].op, ast.MatMult)
+            code = compile(source, "test", "exec")
+            self.assertRaises(TypeError, eval, code,
+                              {'f1': lambda f: f, 'f2': lambda f: f})
+        else:
+            self.assertRaises(SyntaxError, compile, source, "test", "exec")
 
         # Test runtime errors
 

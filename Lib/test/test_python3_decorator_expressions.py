@@ -372,7 +372,11 @@ class NativeDecoratorExpressionTests(unittest.TestCase):
                 compile(tree, '<unreachable-decorator>', 'exec')
 
     def test_unimplemented_expression_forms(self):
-        for expression in ('(assigned := identity)', 'await identity()', 'a @ b'):
+        class Factory(object):
+            def __matmul__(self, other):
+                return identity
+        self.assertEqual(define('a @ b', namespace={'a': Factory(), 'b': object()})(), 42)
+        for expression in ('(assigned := identity)', 'await identity()'):
             with self.assertRaises(SyntaxError):
                 compile('@' + expression + '\ndef f(): pass', '<unsupported>', 'exec')
 

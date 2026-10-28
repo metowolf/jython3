@@ -1310,4 +1310,34 @@ public class IndexerTest extends TestBase {
         assertTrue(cls.getDecoratorList().get(0) instanceof NSubscript);
         assertSame(cls, cls.getDecoratorList().get(0).getParent());
     }
+
+    public void testMatrixBinaryReferencesAndType() throws Exception {
+        String src = index("matrix_binary.py", "left = 1", "right = 'x'", "result = left @ right");
+        assertReference("matrix_binary.left", src.lastIndexOf("left"));
+        assertReference("matrix_binary.right", src.lastIndexOf("right"));
+        NAssign assignment = (NAssign)idx.getAstForFile("matrix_binary.py").body.seq.get(2);
+        NBinOp binary = (NBinOp)assignment.rvalue;
+        assertEquals("@", binary.op);
+        assertTrue(binary.getType().isUnknownType());
+        final java.util.List<String> names = new java.util.ArrayList<String>();
+        binary.visit(new org.python.indexer.ast.DefaultNodeVisitor() {
+            @Override
+            public boolean visit(NName name) {
+                names.add(name.id);
+                return true;
+            }
+        });
+        assertEquals(java.util.Arrays.asList("left", "right"), names);
+    }
+
+    public void testMatrixAugmentedReferencesAndType() throws Exception {
+        String src = index("matrix_aug.py", "left = 1", "right = 'x'", "left @= right");
+        assertReference("matrix_aug.left", src.lastIndexOf("left"));
+        assertReference("matrix_aug.right", src.lastIndexOf("right"));
+        NAugAssign assignment = (NAugAssign)idx.getAstForFile("matrix_aug.py").body.seq.get(2);
+        assertEquals("@", assignment.op);
+        assertTrue(assignment.getType().isUnknownType());
+        assertSame(assignment, assignment.target.getParent());
+        assertSame(assignment, assignment.value.getParent());
+    }
 }

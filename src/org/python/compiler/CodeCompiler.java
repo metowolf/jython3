@@ -83,6 +83,7 @@ import org.python.core.CompilerFlags;
 import org.python.core.ContextGuard;
 import org.python.core.ContextManager;
 import org.python.core.FStringSupport;
+import org.python.core.MatmulSupport;
 import org.python.core.imp;
 import org.python.core.Py;
 import org.python.core.PyCode;
@@ -208,18 +209,18 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
 
     private void saveAugTmps(PythonTree node, int count) throws Exception {
         if (count >= 4) {
-            augtmp4 = code.getLocal(ci(PyObject.class));
+            augtmp4 = code.getLocal(p(PyObject.class));
             code.astore(augtmp4);
         }
         if (count >= 3) {
-            augtmp3 = code.getLocal(ci(PyObject.class));
+            augtmp3 = code.getLocal(p(PyObject.class));
             code.astore(augtmp3);
         }
         if (count >= 2) {
-            augtmp2 = code.getLocal(ci(PyObject.class));
+            augtmp2 = code.getLocal(node instanceof Attribute ? p(String.class) : p(PyObject.class));
             code.astore(augtmp2);
         }
-        augtmp1 = code.getLocal(ci(PyObject.class));
+        augtmp1 = code.getLocal(p(PyObject.class));
         code.astore(augtmp1);
 
         code.aload(augtmp1);
@@ -1664,6 +1665,20 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
 
     @Override
     public Object visitBinOp(BinOp node) throws Exception {
+        if (node.getInternalOp() == operatorType.MatMult) {
+            visit(node.getInternalLeft());
+            // A typed local survives yield and is visible to PyFrame's GC traversal.
+            int left = storeTop();
+            visit(node.getInternalRight());
+            code.aload(left);
+            code.swap();
+            code.invokestatic(p(MatmulSupport.class), "matmul",
+                    sig(PyObject.class, PyObject.class, PyObject.class));
+            code.aconst_null();
+            code.astore(left);
+            code.freeLocal(left);
+            return null;
+        }
         visit(node.getInternalLeft());
         stackProduce();
         visit(node.getInternalRight());
@@ -1737,12 +1752,36 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         return null;
     }
 
+    private expr matrixAugTarget(expr target) {
+        // Manual Python 3 ASTs use Store; do not mutate their context or parent links.
+        if (target instanceof Name) {
+            Name value = (Name)target;
+            return new Name(value, value.getInternalId(), expr_contextType.AugStore);
+        }
+        if (target instanceof Attribute) {
+            Attribute value = (Attribute)target;
+            Attribute copy = new Attribute();
+            copy.setValue(value.getValue());
+            copy.setAttr(value.getAttr());
+            copy.setContext(expr_contextType.AugStore);
+            return copy;
+        }
+        Subscript value = (Subscript)target;
+        Subscript copy = new Subscript();
+        copy.setValue(value.getValue());
+        copy.setSlice(value.getSlice());
+        copy.setContext(expr_contextType.AugStore);
+        return copy;
+    }
+
     @Override
     public Object visitAugAssign(AugAssign node) throws Exception {
         setline(node);
+        expr compileTarget = node.getInternalOp() == operatorType.MatMult
+                ? matrixAugTarget(node.getInternalTarget()) : node.getInternalTarget();
 
         augmode = expr_contextType.Load;
-        visit(node.getInternalTarget());
+        visit(compileTarget);
         int target = storeTop();
 
         visit(node.getInternalValue());
@@ -1791,12 +1830,17 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         if (node.getInternalOp() == operatorType.Div && module.getFutures().areDivisionOn()) {
             name = "_itruediv";
         }
-        code.invokevirtual(p(PyObject.class), name, sig(PyObject.class, PyObject.class));
+        if (node.getInternalOp() == operatorType.MatMult) {
+            code.invokestatic(p(MatmulSupport.class), "imatmul",
+                    sig(PyObject.class, PyObject.class, PyObject.class));
+        } else {
+            code.invokevirtual(p(PyObject.class), name, sig(PyObject.class, PyObject.class));
+        }
         code.freeLocal(target);
 
         temporary = storeTop();
         augmode = expr_contextType.Store;
-        visit(node.getInternalTarget());
+        visit(compileTarget);
         code.freeLocal(temporary);
 
         return null;

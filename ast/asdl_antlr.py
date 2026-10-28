@@ -215,12 +215,12 @@ class JavaVisitor(EmitVisitor):
 
             self.attributes(type, name, depth);
 
-            self.emit('@ExposedMethod', depth + 1)
             self.emit('public PyObject __int__() {', depth + 1)
             self.emit("return %s___int__();" % type.name, depth + 2)
             self.emit("}", depth + 1)
             self.emit('', 0)
 
+            self.emit('@ExposedMethod', depth + 1)
             self.emit("final PyObject %s___int__() {" % type.name, depth + 1)
             self.emit('return Py.newInteger(%s);' % str(i + 1), depth + 2)
             self.emit("}", depth + 1)

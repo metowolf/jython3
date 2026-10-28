@@ -3,6 +3,7 @@ package org.python.modules;
 
 import org.python.core.ArgParser;
 import org.python.core.ClassDictInit;
+import org.python.core.MatmulSupport;
 import org.python.core.Py;
 import org.python.core.PyBuiltinFunctionSet;
 import org.python.core.PyIgnoreMethodTag;
@@ -99,6 +100,8 @@ class OperatorFunctions extends PyBuiltinFunctionSet
         case 49: return arg1._isub(arg2);
         case 50: return arg1._itruediv(arg2);
         case 51: return arg1._ixor(arg2);
+        case 53: return MatmulSupport.matmul(arg1, arg2);
+        case 54: return MatmulSupport.imatmul(arg1, arg2);
         default:
             throw info.unexpectedCall(2, false);
         }
@@ -253,6 +256,10 @@ public class operator extends PyObject implements ClassDictInit
         dict.__setitem__("ixor", new OperatorFunctions("ixor", 51, 2));
         dict.__setitem__("__index__", new OperatorFunctions("__index__", 52, 1));
         dict.__setitem__("index", new OperatorFunctions("index", 52, 1));
+        dict.__setitem__("matmul", new OperatorFunctions("matmul", 53, 2));
+        dict.__setitem__("__matmul__", new OperatorFunctions("__matmul__", 53, 2));
+        dict.__setitem__("imatmul", new OperatorFunctions("imatmul", 54, 2));
+        dict.__setitem__("__imatmul__", new OperatorFunctions("__imatmul__", 54, 2));
 
         dict.__setitem__("attrgetter", PyAttrGetter.TYPE);
         dict.__setitem__("itemgetter", PyItemGetter.TYPE);

@@ -8,6 +8,7 @@ import org.python.antlr.ast.ClassDef;
 import org.python.antlr.ast.Call;
 import org.python.antlr.ast.Assign;
 import org.python.antlr.ast.AugAssign;
+import org.python.antlr.ast.BinOp;
 import org.python.antlr.ast.Delete;
 import org.python.antlr.ast.For;
 import org.python.antlr.ast.Dict;
@@ -41,6 +42,7 @@ import org.python.antlr.ast.arguments;
 import org.python.antlr.ast.comprehension;
 import org.python.antlr.ast.expr_contextType;
 import org.python.antlr.ast.keyword;
+import org.python.antlr.ast.operatorType;
 import org.python.antlr.base.expr;
 import org.python.antlr.base.stmt;
 import org.python.core.ParserFacade;
@@ -416,8 +418,33 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         return null;
     }
 
+    private void validateMatmulOperand(expr value, PythonTree owner) throws Exception {
+        if (value == null || expressionContext(value) != expr_contextType.Load) {
+            code_compiler.error("matrix operand must have a value in Load context", true, owner);
+        }
+    }
+
+    @Override
+    public Object visitBinOp(BinOp node) throws Exception {
+        if (node.getInternalOp() == operatorType.MatMult) {
+            validateMatmulOperand(node.getInternalLeft(), node);
+            validateMatmulOperand(node.getInternalRight(), node);
+        }
+        traverse(node);
+        return null;
+    }
+
     @Override
     public Object visitAugAssign(AugAssign node) throws Exception {
+        if (node.getInternalOp() == operatorType.MatMult) {
+            expr target = node.getInternalTarget();
+            if (!(target instanceof Name || target instanceof Attribute || target instanceof Subscript)
+                    || expressionContext(target) != expr_contextType.Store
+                    && expressionContext(target) != expr_contextType.AugStore) {
+                code_compiler.error("invalid matrix augmented-assignment target", true, node);
+            }
+            validateMatmulOperand(node.getInternalValue(), node);
+        }
         checkDictTarget(node.getInternalTarget());
         traverse(node);
         return null;

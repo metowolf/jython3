@@ -14,5 +14,6 @@ public enum operatorType {
     BitOr,
     BitXor,
     BitAnd,
-    FloorDiv;
+    FloorDiv,
+    MatMult;
 }

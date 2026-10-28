@@ -143,6 +143,8 @@ public class AstAdapters {
                     return operatorType.BitAnd;
                 case 12:
                     return operatorType.FloorDiv;
+                case 13:
+                    return operatorType.MatMult;
                 default:
                     return operatorType.UNDEFINED;
             }
@@ -176,6 +178,8 @@ public class AstAdapters {
                 return new BitAnd();
             case FloorDiv:
                 return new FloorDiv();
+            case MatMult:
+                return new MatMult();
             default:
                 return Py.None;
         }

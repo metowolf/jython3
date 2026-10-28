@@ -744,6 +744,13 @@ The text for an official release would continue like ...
 
     <target name="compile" depends="init, antlr-gen, brand-version">
         <mkdir dir="${compile.dir}"/>
+        <!-- javac inlines ANTLR token numbers. Recompile their consumers whenever
+             the generated grammar changes, including on incremental builds. -->
+        <dependset>
+            <srcfileset dir="${gensrc.dir}/org/python/antlr" includes="Python*Parser.java"/>
+            <targetfileset dir="${compile.dir}"
+                includes="org/python/antlr/PythonTokenSource*.class,org/python/antlr/AnalyzingParser*.class,org/python/indexer/demos/Styler*.class"/>
+        </dependset>
         <javac destdir="${compile.dir}"
                target="${jdk.target.version}"
                source="${jdk.source.version}"

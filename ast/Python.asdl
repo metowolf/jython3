@@ -98,7 +98,7 @@ module Python version "$Revision$"
 	boolop = And | Or 
 
 	operator = Add | Sub | Mult | Div | Mod | Pow | LShift 
-                 | RShift | BitOr | BitXor | BitAnd | FloorDiv
+                 | RShift | BitOr | BitXor | BitAnd | FloorDiv | MatMult
 
 	unaryop = Invert | Not | UAdd | USub
 

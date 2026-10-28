@@ -146,6 +146,7 @@ op_LShift.derived:org.python.antlr.op.LShiftDerived
 op_Load.derived:org.python.antlr.op.LoadDerived
 op_Lt.derived:org.python.antlr.op.LtDerived
 op_LtE.derived:org.python.antlr.op.LtEDerived
+op_MatMult.derived:org.python.antlr.op.MatMultDerived
 op_Mod.derived:org.python.antlr.op.ModDerived
 op_Mult.derived:org.python.antlr.op.MultDerived
 op_Not.derived:org.python.antlr.op.NotDerived

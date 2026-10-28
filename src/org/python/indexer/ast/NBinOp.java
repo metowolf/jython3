@@ -40,6 +40,10 @@ public class NBinOp extends NNode {
             rtype = resolveExpr(right, s).follow();
         }
 
+        // Matrix multiplication has user-defined results, not scalar promotion.
+        if ("@".equals(op)) {
+            return setType(new NUnknownType());
+        }
         // If either non-null operand is a string, assume the result is a string.
         if (ltype == Indexer.idx.builtins.BaseStr || rtype == Indexer.idx.builtins.BaseStr) {
             return setType(Indexer.idx.builtins.BaseStr);

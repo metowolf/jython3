@@ -224,6 +224,7 @@ org/python/antlr/op/Load.class
 org/python/antlr/op/LShift.class
 org/python/antlr/op/Lt.class
 org/python/antlr/op/LtE.class
+org/python/antlr/op/MatMult.class
 org/python/antlr/op/Mod.class
 org/python/antlr/op/Mult.class
 org/python/antlr/op/Not.class

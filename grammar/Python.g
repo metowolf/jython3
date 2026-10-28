@@ -682,7 +682,7 @@ expr_stmt
     )
     ;
 
-//augassign: ('+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' |
+//augassign: ('+=' | '-=' | '*=' | '@=' | '/=' | '%=' | '&=' | '|=' | '^=' |
 //            '<<=' | '>>=' | '**=' | '//=')
 augassign
     returns [operatorType op]
@@ -697,6 +697,10 @@ augassign
     | STAREQUAL
         {
             $op = operatorType.Mult;
+        }
+    | ATEQUAL
+        {
+            $op = operatorType.MatMult;
         }
     | SLASHEQUAL
         {
@@ -1619,7 +1623,7 @@ arith_op
       }
     ;
 
-//term: factor (('*'|'/'|'%'|'//') factor)*
+//term: factor (('*'|'@'|'/'|'%'|'//') factor)*
 term
     returns [Token lparen = null]
 @init {
@@ -1653,6 +1657,10 @@ term_op
     : STAR
       {
           $op = operatorType.Mult;
+      }
+    | AT
+      {
+          $op = operatorType.MatMult;
       }
     | SLASH
       {
@@ -2414,6 +2422,8 @@ DOUBLESTAREQUAL    : '**=' ;
 DOUBLESLASHEQUAL    : '//=' ;
 
 DOT : '.' ;
+
+ATEQUAL : '@=' ;
 
 AT : '@' ;
 

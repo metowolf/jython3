@@ -338,12 +338,13 @@ expr_stmt
     )
     ;
 
-//augassign: ('+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' |
+//augassign: ('+=' | '-=' | '*=' | '@=' | '/=' | '%=' | '&=' | '|=' | '^=' |
 //            '<<=' | '>>=' | '**=' | '//=')
 augassign
     : PLUSEQUAL
     | MINUSEQUAL
     | STAREQUAL
+    | ATEQUAL
     | SLASHEQUAL
     | PERCENTEQUAL
     | AMPEREQUAL
@@ -678,7 +679,7 @@ arith_op
     | MINUS
     ;
 
-//term: factor (('*'|'/'|'%'|'//') factor)*
+//term: factor (('*'|'@'|'/'|'%'|'//') factor)*
 term
     : factor
         ( (term_op factor
@@ -689,6 +690,7 @@ term
 
 term_op
     :STAR
+    |AT
     |SLASH
     |PERCENT
     |DOUBLESLASH
@@ -1038,6 +1040,8 @@ DOUBLESTAREQUAL    : '**=' ;
 DOUBLESLASHEQUAL    : '//=' ;
 
 DOT : '.' ;
+
+ATEQUAL : '@=' ;
 
 AT : '@' ;
 
