@@ -251,7 +251,7 @@ attr
 
 // Match the full parser's expression decorators and incomplete input.
 decorator
-    : AT test NEWLINE
+    : AT namedexpr_test NEWLINE
     ;
 
 //decorators: decorator+
@@ -501,13 +501,13 @@ compound_stmt
 
 //if_stmt: 'if' test ':' suite ('elif' test ':' suite)* ['else' ':' suite]
 if_stmt
-    : IF test COLON suite elif_clause?
+    : IF namedexpr_test COLON suite elif_clause?
     ;
 
 //not in CPython's Grammar file
 elif_clause
     : else_clause
-    | ELIF test COLON suite
+    | ELIF namedexpr_test COLON suite
         (elif_clause
         |
         )
@@ -520,7 +520,7 @@ else_clause
 
 //while_stmt: 'while' test ':' suite ['else' ':' suite]
 while_stmt
-    : WHILE test COLON suite (ORELSE COLON suite)?
+    : WHILE namedexpr_test COLON suite (ORELSE COLON suite)?
     ;
 
 //for_stmt: 'for' exprlist 'in' testlist ':' suite ['else' ':' suite]
@@ -565,6 +565,11 @@ suite
                                |EOF
                                )
               )
+    ;
+
+namedexpr_test
+    : (NAME COLONEQUAL) => NAME COLONEQUAL test
+    | test
     ;
 
 //test: or_test ['if' or_test 'else' test] | lambdef
@@ -745,16 +750,16 @@ atom
 
 //listmaker: test ( list_for | (',' test)* [','] )
 listmaker
-    : star_test
+    : star_namedexpr
         (list_for
-        | (options {greedy=true;}:COMMA star_test)*
+        | (options {greedy=true;}:COMMA star_namedexpr)*
         ) (COMMA)?
     ;
 
 //testlist_gexp: test ( comp_for | (',' test)* [','] )
 testlist_gexp
-    : star_test
-        ( ((options {k=2;}: COMMA star_test)* (COMMA)?
+    : star_namedexpr
+        ( ((options {k=2;}: COMMA star_namedexpr)* (COMMA)?
           )
         | (comp_for
           )
@@ -789,7 +794,7 @@ subscript
    => test (COLON (test)? (sliceop)?)?
     | (COLON)
    => COLON (test)? (sliceop)?
-    | test
+    | namedexpr_test
     ;
 
 //sliceop: ':' [test]
@@ -802,6 +807,10 @@ sliceop
 
 star_expr
     : STAR expr
+    ;
+
+star_namedexpr
+    : star_expr | namedexpr_test
     ;
 
 star_test
@@ -835,17 +844,10 @@ testlist
 //                  (test (comp_for | (',' test)* [','])) )
 dictorsetmaker
     : DOUBLESTAR expr (options {k=2;}: COMMA dict_item)* COMMA?
-    | star_test
-         (
-             (COLON test
-               ( comp_for
-               | (options {k=2;}: COMMA dict_item)*
-               )
-             |(COMMA star_test)*
-             )
-             (COMMA)?
-         | comp_for
-         )
+    | (test COLON) => test COLON test
+      (comp_for | (options {k=2;}: COMMA dict_item)* COMMA?)
+    | star_namedexpr
+      (comp_for | (options {k=2;}: COMMA star_namedexpr)* COMMA?)
     ;
 
 dict_item
@@ -864,7 +866,7 @@ class_bases
 
 class_base
     : STAR test
-    | test
+    | namedexpr_test
     ;
 
 // Generalized call unpacking, matching the full parser's argument forms.
@@ -875,7 +877,7 @@ arglist
 argument
     : STAR test
     | DOUBLESTAR test
-    | test (ASSIGN test | comp_for | )
+    | namedexpr_test (ASSIGN test | comp_for | )
     ;
 
 //list_iter: list_for | list_if
@@ -958,6 +960,8 @@ RPAREN    : ')' {implicitLineJoiningLevel--;} ;
 LBRACK    : '[' {implicitLineJoiningLevel++;} ;
 
 RBRACK    : ']' {implicitLineJoiningLevel--;} ;
+
+COLONEQUAL : ':=' ;
 
 COLON     : ':' ;
 

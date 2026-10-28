@@ -328,6 +328,13 @@ public class GrammarActions {
     }
 
     void recurseSetContext(PythonTree tree, expr_contextType context) {
+        if (tree instanceof org.python.antlr.ast.NamedExpr) {
+            // An expression's result context must not overwrite its binding target.
+            org.python.antlr.ast.NamedExpr named = (org.python.antlr.ast.NamedExpr)tree;
+            recurseSetContext(named.getInternalTarget(), expr_contextType.Store);
+            recurseSetContext(named.getInternalValue(), expr_contextType.Load);
+            return;
+        }
         if (tree instanceof Context) {
             ((Context)tree).setContext(context);
         }
@@ -669,6 +676,8 @@ public class GrammarActions {
             errorHandler.error("can't assign to function call", e);
         } else if (e instanceof Repr) {
             errorHandler.error("can't assign to repr", e);
+        } else if (e instanceof org.python.antlr.ast.NamedExpr) {
+            errorHandler.error("can't assign to assignment expression", e);
         } else if (e instanceof IfExp) {
             errorHandler.error("can't assign to conditional expression", e);
         } else if (e instanceof ListComp) {
@@ -734,7 +743,9 @@ public class GrammarActions {
     }
 
     void checkDelete(expr e) {
-        if (e instanceof org.python.antlr.ast.Starred) {
+        if (e instanceof org.python.antlr.ast.NamedExpr) {
+            errorHandler.error("can't delete assignment expression", e);
+        } else if (e instanceof org.python.antlr.ast.Starred) {
             errorHandler.error("cannot delete starred expression", e);
         } else if (e instanceof Dict) {
             errorHandler.error("can't delete dict display", e);

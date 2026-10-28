@@ -49,6 +49,7 @@ import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.List;
 import org.python.antlr.ast.ListComp;
 import org.python.antlr.ast.Name;
+import org.python.antlr.ast.NamedExpr;
 import org.python.antlr.ast.Nonlocal;
 import org.python.antlr.ast.Num;
 import org.python.antlr.ast.Pass;
@@ -637,6 +638,20 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     }
 
     @Override
+    public Object visitNamedExpr(NamedExpr node) throws Exception {
+        visit(node.getInternalValue());
+        int value = storeTop();
+        int previousTemporary = temporary;
+        set(node.getInternalTarget(), value);
+        temporary = previousTemporary;
+        code.aload(value);
+        code.aconst_null();
+        code.astore(value);
+        code.freeLocal(value);
+        return null;
+    }
+
+    @Override
     public Object visitAssign(Assign node) throws Exception {
         setline(node);
         visit(node.getInternalValue());
@@ -812,7 +827,7 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                     code.aload(array);
                     // Stack: |- ... value array
                     code.swap();
-                    code.iconst(i++);
+                    code.iconst(i);
                     code.swap();
                     // Stack: |- ... array index value
                     code.aastore();
@@ -834,11 +849,13 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                 } else {
                     code.aload(array);
                     // Stack: |- ... array
-                    code.iconst(i--);
+                    code.iconst(i);
                     code.aaload();
                     // Stack: |- ... value
                     code.checkcast(signature);
                 }
+                // ThreadState has a reserved slot too, but is reloaded, not saved.
+                i--;
             }
             code.freeLocal(array);
         }

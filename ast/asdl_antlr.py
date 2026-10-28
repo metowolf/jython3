@@ -731,6 +731,27 @@ def main(outdir, grammar="Python.asdl"):
     c.visit(mod)
 
 indexer_support = {
+"NamedExpr": """
+    @Override
+    public int traverse(Visitproc visit, Object arg) {
+        int result = super.traverse(visit, arg);
+        if (result != 0) return result;
+        if (target != null) {
+            result = visit.visit(target, arg);
+            if (result != 0) return result;
+        }
+        if (value != null) {
+            result = visit.visit(value, arg);
+            if (result != 0) return result;
+        }
+        return __dict__ == null ? 0 : visit.visit(__dict__, arg);
+    }
+    @Override
+    public boolean refersDirectlyTo(PyObject object) {
+        return object != null && (object == target || object == value || object == __dict__
+                || super.refersDirectlyTo(object));
+    }
+""",
 "Starred": """
     @Override
     public int traverse(Visitproc visit, Object arg) {

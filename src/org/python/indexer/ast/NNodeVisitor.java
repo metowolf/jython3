@@ -51,6 +51,7 @@ public interface NNodeVisitor {
     public boolean visit(NListComp m);
     public boolean visit(NModule m);
     public boolean visit(NName m);
+    public boolean visit(NNamedExpr m);
     public boolean visit(NNum m);
     public boolean visit(NPass m);
     public boolean visit(NPlaceHolder m);

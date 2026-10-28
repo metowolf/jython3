@@ -192,6 +192,11 @@ public class DefaultNodeVisitor implements NNodeVisitor {
     }
 
     @Override
+    public boolean visit(NNamedExpr n) {
+        return traverseIntoNodes;
+    }
+
+    @Override
     public boolean visit(NName n) {
         return traverseIntoNodes;
     }

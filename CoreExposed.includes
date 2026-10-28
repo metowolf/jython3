@@ -171,6 +171,7 @@ org/python/antlr/ast/List.class
 org/python/antlr/ast/ListComp.class
 org/python/antlr/ast/Module.class
 org/python/antlr/ast/Name.class
+org/python/antlr/ast/NamedExpr.class
 org/python/antlr/ast/Num.class
 org/python/antlr/ast/Pass.class
 org/python/antlr/ast/Print.class

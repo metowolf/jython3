@@ -376,9 +376,11 @@ class NativeDecoratorExpressionTests(unittest.TestCase):
             def __matmul__(self, other):
                 return identity
         self.assertEqual(define('a @ b', namespace={'a': Factory(), 'b': object()})(), 42)
-        for expression in ('(assigned := identity)', 'await identity()'):
-            with self.assertRaises(SyntaxError):
-                compile('@' + expression + '\ndef f(): pass', '<unsupported>', 'exec')
+        namespace = {'identity': identity}
+        self.assertEqual(define('(assigned := identity)', namespace=namespace)(), 42)
+        self.assertIs(namespace['assigned'], identity)
+        with self.assertRaises(SyntaxError):
+            compile('@await identity()\ndef f(): pass', '<unsupported>', 'exec')
 
 
 def test_main():

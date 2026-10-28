@@ -445,15 +445,19 @@ public class PyFrame extends PyObject implements Traverseproc {
                         if (retVal != 0) {
                             return retVal;
                         }
-                    } else if (ob instanceof PyObject[]) {
-                        // Compiler temporaries include partially evaluated bases,
-                        // decorators and arguments. Their elements are strong edges.
-                        for (PyObject value : (PyObject[]) ob) {
-                            if (value != null) {
-                                retVal = visit.visit(value, arg);
-                                if (retVal != 0) {
-                                    return retVal;
-                                }
+                    } else if (ob instanceof Object[]) {
+                        // Argument arrays and mixed operand-stack spills both hold
+                        // strong Python edges. Java strings and empty slots do not.
+                        for (Object value : (Object[]) ob) {
+                            if (value instanceof PyObject) {
+                                retVal = visit.visit((PyObject)value, arg);
+                            } else if (value instanceof Traverseproc) {
+                                retVal = ((Traverseproc)value).traverse(visit, arg);
+                            } else {
+                                continue;
+                            }
+                            if (retVal != 0) {
+                                return retVal;
                             }
                         }
                     } else if (ob instanceof Traverseproc) {
@@ -551,9 +555,11 @@ public class PyFrame extends PyObject implements Traverseproc {
             for (Object obj: f_savedlocals) {
                 if (obj == ob) {
                     return true;
-                } else if (obj instanceof PyObject[]) {
-                    for (PyObject value : (PyObject[]) obj) {
-                        if (value == ob) {
+                } else if (obj instanceof Object[]) {
+                    for (Object value : (Object[]) obj) {
+                        if (value == ob || value instanceof Traverseproc
+                                && !(value instanceof PyObject)
+                                && ((Traverseproc)value).refersDirectlyTo(ob)) {
                             return true;
                         }
                     }

@@ -15,14 +15,18 @@ exception chaining (`raise ... from ...`), PEP 498 f-strings with debug fields,
 extended assignment unpacking, iterable unpacking in list/tuple/set displays,
 dictionary `**mapping` displays, generalized multiple `*args`/`**kwargs`
 function calls, iterable class bases such as `class C(*bases, Other, *more)`,
-expression decorators such as `@decorators[0]` or `@a if enabled else b`, and
-matrix operators `@`/`@=` with forward, reflected and in-place special methods.
+expression decorators such as `@decorators[0]` or `@a if enabled else b`,
+matrix operators `@`/`@=` with forward, reflected and in-place special methods,
+and assignment expressions such as `if value := read():` or `(saved := value)`.
+Assignment expressions preserve native local/global/nonlocal bindings and Java
+object identity. They are explicitly rejected inside comprehensions until modern
+comprehension scopes are implemented; this is not complete PEP 572 support.
 Call expansion and matrix dispatch preserve Java interoperation. Matrix operators
 also have `operator.matmul`/`operator.imatmul` interfaces; no built-in matrix
 container, numerical algorithm or NumPy compatibility is supplied.
-Decorators use the existing native expression language; assignment expressions
-and `async`/`await` remain unsupported. Class-header keywords and the full
-Python 3 metaclass protocol are not implemented.
+Decorators use the existing native expression language; `async`/`await` remains
+unsupported. Class-header keywords and the full Python 3 metaclass protocol are
+not implemented.
 It is **not a complete Python 3 implementation**; the runtime and standard library
 are still based on Python 2.7. Python 3.12's PEP 701 f-string extensions are not
 implemented. Some Python 2 behaviors deliberately change, including closure-cell

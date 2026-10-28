@@ -27,6 +27,7 @@ import org.python.antlr.ast.Interactive;
 import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.ListComp;
 import org.python.antlr.ast.Name;
+import org.python.antlr.ast.NamedExpr;
 import org.python.antlr.ast.Nonlocal;
 import org.python.antlr.ast.Raise;
 import org.python.antlr.ast.Return;
@@ -60,6 +61,9 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     private Stack<ScopeInfo> scopes;
     private ScopeInfo cur = null;
     private Hashtable<PythonTree,ScopeInfo> nodeScopes;
+
+    private final java.util.Map<ScopeInfo, java.util.Set<String>> namedBindings =
+            new java.util.IdentityHashMap<ScopeInfo, java.util.Set<String>>();
 
     private int level = 0;
     private int func_level = 0;
@@ -394,7 +398,9 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     }
 
     private void checkDictTarget(expr target) throws Exception {
-        if (target instanceof Dict) {
+        if (target instanceof NamedExpr) {
+            code_compiler.error("assignment expression cannot be an assignment or deletion target", true, target);
+        } else if (target instanceof Dict) {
             code_compiler.error("dict display cannot be an assignment or deletion target", true, target);
         } else if (target instanceof Tuple) {
             for (expr child : ((Tuple)target).getInternalElts()) {
@@ -555,7 +561,8 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
                     what = "use";
                 }
                 code_compiler.error("name '" + name
-                        + "' declared global after " + what, false, node);
+                        + "' declared global after " + what,
+                        namedBindings.containsKey(cur) && namedBindings.get(cur).contains(name), node);
             }
         }
         return null;
@@ -629,6 +636,32 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     }
 
     @Override
+    public Object visitNamedExpr(NamedExpr node) throws Exception {
+        expr target = node.getInternalTarget();
+        if (!(target instanceof Name) || ((Name)target).getInternalCtx() != expr_contextType.Store) {
+            code_compiler.error("assignment expression target must be a name in Store context", true, node);
+        }
+        String name = ((Name)target).getInternalId();
+        if (name == null || name.isEmpty() || name.equals("None") || name.equals("True")
+                || name.equals("False") || name.equals("__debug__")) {
+            code_compiler.error("invalid assignment expression target name", true, node);
+        }
+        expr value = node.getInternalValue();
+        if (value == null || expressionContext(value) != expr_contextType.Load) {
+            code_compiler.error("assignment expression value must have Load context", true, node);
+        }
+        visit(value);
+        visit(target);
+        java.util.Set<String> bindings = namedBindings.get(cur);
+        if (bindings == null) {
+            bindings = new java.util.HashSet<String>();
+            namedBindings.put(cur, bindings);
+        }
+        bindings.add(name);
+        return null;
+    }
+
+    @Override
     public Object visitName(Name node) throws Exception {
         String name = node.getInternalId();
         if (node.getInternalCtx() != expr_contextType.Load) {
@@ -642,8 +675,22 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         return null;
     }
 
+    private void rejectComprehensionNamedExpr(PythonTree node) throws Exception {
+        // Python 2 list comprehensions leak their iteration bindings. Do not
+        // implement PEP 572 outer binding on top of incompatible legacy scopes.
+        node.accept(new Visitor() {
+            @Override
+            public Object visitNamedExpr(NamedExpr expression) throws Exception {
+                code_compiler.error("assignment expressions in comprehensions require modern comprehension scopes",
+                        true, expression);
+                return null;
+            }
+        });
+    }
+
     @Override
     public Object visitListComp(ListComp node) throws Exception {
+        rejectComprehensionNamedExpr(node);
         for (comprehension generator : node.getInternalGenerators()) {
             checkDictTarget(generator.getInternalTarget());
         }
@@ -685,6 +732,7 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
 
     private Object visitInternalGenerators(expr node, expr elt, java.util.List<comprehension> generators)
             throws Exception {
+        rejectComprehensionNamedExpr(node);
         // The first iterator is evaluated in the outer scope
         if (generators != null && generators.size() > 0) {
             visit(generators.get(0).getInternalIter());

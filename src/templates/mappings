@@ -99,6 +99,7 @@ ast_List.derived:org.python.antlr.ast.ListDerived
 ast_ListComp.derived:org.python.antlr.ast.ListCompDerived
 ast_Module.derived:org.python.antlr.ast.ModuleDerived
 ast_Name.derived:org.python.antlr.ast.NameDerived
+ast_NamedExpr.derived:org.python.antlr.ast.NamedExprDerived
 ast_Num.derived:org.python.antlr.ast.NumDerived
 ast_Pass.derived:org.python.antlr.ast.PassDerived
 ast_Print.derived:org.python.antlr.ast.PrintDerived

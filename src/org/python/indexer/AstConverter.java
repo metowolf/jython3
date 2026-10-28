@@ -36,6 +36,7 @@ import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.ListComp;
 import org.python.antlr.ast.Module;
 import org.python.antlr.ast.Name;
+import org.python.antlr.ast.NamedExpr;
 import org.python.antlr.ast.Num;
 import org.python.antlr.ast.Pass;
 import org.python.antlr.ast.Print;
@@ -513,6 +514,12 @@ public class AstConverter extends Visitor {
                        convertListStmt(n.getInternalBody()),
                        convertListStmt(n.getInternalOrelse()),
                        start(n), stop(n));
+    }
+
+    @Override
+    public Object visitNamedExpr(NamedExpr n) throws Exception {
+        return new org.python.indexer.ast.NNamedExpr(convExpr(n.getInternalTarget()),
+                convExpr(n.getInternalValue()), start(n), stop(n));
     }
 
     @Override

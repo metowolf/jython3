@@ -152,6 +152,10 @@ public abstract class GenericNodeVisitor extends DefaultNodeVisitor {
         return traverseIntoNodes && dispatch(n);
     }
 
+    public boolean visit(NNamedExpr n) {
+        return traverseIntoNodes && dispatch(n);
+    }
+
     public boolean visit(NName n) {
         return traverseIntoNodes && dispatch(n);
     }

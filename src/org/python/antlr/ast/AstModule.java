@@ -64,6 +64,7 @@ public class AstModule implements ClassDictInit {
         dict.__setitem__("ListComp", ListComp.TYPE);
         dict.__setitem__("Module", Module.TYPE);
         dict.__setitem__("Name", Name.TYPE);
+        dict.__setitem__("NamedExpr", NamedExpr.TYPE);
         dict.__setitem__("Num", Num.TYPE);
         dict.__setitem__("Pass", Pass.TYPE);
         dict.__setitem__("Print", Print.TYPE);

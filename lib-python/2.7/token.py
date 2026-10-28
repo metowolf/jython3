@@ -64,7 +64,8 @@ AT = 50
 OP = 51
 ERRORTOKEN = 52
 ATEQUAL = 53
-N_TOKENS = 54
+COLONEQUAL = 54
+N_TOKENS = 55
 NT_OFFSET = 256
 #--end constants--
 

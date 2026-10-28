@@ -1340,4 +1340,50 @@ public class IndexerTest extends TestBase {
         assertSame(assignment, assignment.target.getParent());
         assertSame(assignment, assignment.value.getParent());
     }
+
+    public void testNamedExpressionBindingsAndReferences() throws Exception {
+        String src = index("named_expr.py", "source = 42", "result = (bound := source)", "copy = bound");
+        assertReference("named_expr.source", src.lastIndexOf("source"));
+        assertReference("named_expr.bound", src.lastIndexOf("bound"));
+        assertEquals(src.indexOf("bound"), idx.lookupQname("named_expr.bound").getSignatureNode().start());
+        NAssign assignment = (NAssign)idx.getAstForFile("named_expr.py").body.seq.get(1);
+        org.python.indexer.ast.NNamedExpr named = (org.python.indexer.ast.NNamedExpr)assignment.rvalue;
+        assertSame(named, named.target.getParent());
+        assertSame(named, named.value.getParent());
+        assertSame(named.value.getType(), named.getType());
+    }
+
+    public void testNamedExpressionFunctionScope() throws Exception {
+        String src = index("named_function.py", "outer = 1", "def f():", "    result = (local := outer)",
+                           "    return local", "answer = f()");
+        assertReference("named_function.outer", src.lastIndexOf("outer"));
+        assertReference("named_function.f&local", src.lastIndexOf("local"));
+        assertNull(idx.lookupQname("named_function.local"));
+    }
+
+    public void testNamedExpressionSerializationAndVisitor() throws Exception {
+        index("named_serial.py", "result = (bound := source)");
+        NModule module = idx.getAstForFile("named_serial.py");
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.ObjectOutputStream output = new java.io.ObjectOutputStream(bytes)) {
+            output.writeObject(module);
+        }
+        NModule copy;
+        try (java.io.ObjectInputStream input = new java.io.ObjectInputStream(
+                new java.io.ByteArrayInputStream(bytes.toByteArray()))) {
+            copy = (NModule)input.readObject();
+        }
+        final java.util.List<String> names = new java.util.ArrayList<String>();
+        final int[] count = {0};
+        copy.visit(new org.python.indexer.ast.GenericNodeVisitor() {
+            @Override
+            public boolean dispatch(NNode node) {
+                if (node instanceof org.python.indexer.ast.NNamedExpr) count[0]++;
+                if (node instanceof NName) names.add(((NName)node).id);
+                return true;
+            }
+        });
+        assertEquals(1, count[0]);
+        assertEquals(java.util.Arrays.asList("result", "bound", "source"), names);
+    }
 }

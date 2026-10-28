@@ -125,6 +125,7 @@ import org.python.antlr.ast.ListComp;
 import org.python.antlr.ast.Lambda;
 import org.python.antlr.ast.Module;
 import org.python.antlr.ast.Name;
+import org.python.antlr.ast.NamedExpr;
 import org.python.antlr.ast.Nonlocal;
 import org.python.antlr.ast.Num;
 import org.python.antlr.ast.operatorType;
@@ -482,7 +483,7 @@ decorator
 @after {
    $decorator.tree = $etype;
 }
-    : AT value=test[expr_contextType.Load] NEWLINE
+    : AT value=namedexpr_test[expr_contextType.Load] NEWLINE
       { $etype = actions.castExpr($value.tree); }
     ;
 
@@ -1131,9 +1132,9 @@ if_stmt
 @after {
    $if_stmt.tree = stype;
 }
-    : IF test[expr_contextType.Load] COLON ifsuite=suite[false] elif_clause?
+    : IF namedexpr_test[expr_contextType.Load] COLON ifsuite=suite[false] elif_clause?
       {
-          stype = new If($IF, actions.castExpr($test.tree), actions.castStmts($ifsuite.stypes),
+          stype = new If($IF, actions.castExpr($namedexpr_test.tree), actions.castStmts($ifsuite.stypes),
               actions.makeElse($elif_clause.stypes, $elif_clause.tree));
       }
     ;
@@ -1153,14 +1154,14 @@ elif_clause
       {
           $stypes = $else_clause.stypes;
       }
-    | ELIF test[expr_contextType.Load] COLON suite[false]
+    | ELIF namedexpr_test[expr_contextType.Load] COLON suite[false]
       (e2=elif_clause
        {
-           stype = new If($test.start, actions.castExpr($test.tree), actions.castStmts($suite.stypes), actions.makeElse($e2.stypes, $e2.tree));
+           stype = new If($namedexpr_test.start, actions.castExpr($namedexpr_test.tree), actions.castStmts($suite.stypes), actions.makeElse($e2.stypes, $e2.tree));
        }
       |
        {
-           stype = new If($test.start, actions.castExpr($test.tree), actions.castStmts($suite.stypes), new ArrayList<stmt>());
+           stype = new If($namedexpr_test.start, actions.castExpr($namedexpr_test.tree), actions.castStmts($suite.stypes), new ArrayList<stmt>());
        }
       )
     ;
@@ -1182,9 +1183,9 @@ while_stmt
 @after {
    $while_stmt.tree = stype;
 }
-    : WHILE test[expr_contextType.Load] COLON s1=suite[false] (ORELSE COLON s2=suite[false])?
+    : WHILE namedexpr_test[expr_contextType.Load] COLON s1=suite[false] (ORELSE COLON s2=suite[false])?
       {
-          stype = actions.makeWhile($WHILE, actions.castExpr($test.tree), $s1.stypes, $s2.stypes);
+          stype = actions.makeWhile($WHILE, actions.castExpr($namedexpr_test.tree), $s1.stypes, $s2.stypes);
       }
     ;
 
@@ -1306,6 +1307,18 @@ scope {
            }
        }
       )+ DEDENT
+    ;
+
+// Assignment expressions bind only a bare name; RHS remains an ordinary test.
+namedexpr_test[expr_contextType ctype]
+@after {
+    if ($target != null) {
+        $namedexpr_test.tree = new NamedExpr($target,
+            new Name($target, $target.text, expr_contextType.Store), actions.castExpr($value.tree));
+    }
+}
+    : (NAME COLONEQUAL) => target=NAME COLONEQUAL value=test[expr_contextType.Load]
+    | test[ctype] -> test
     ;
 
 //test: or_test ['if' or_test 'else' test] | lambdef
@@ -1827,14 +1840,14 @@ listmaker[Token lbrack]
 @after {
    $listmaker.tree = etype;
 }
-    : t+=star_test[$expr::ctype]
+    : t+=star_namedexpr[$expr::ctype]
         (list_for[gens]
          {
              Collections.reverse(gens);
              List<comprehension> c = gens;
              etype = new ListComp($listmaker.start, actions.castExpr($t.get(0)), c);
          }
-        | (options {greedy=true;}:COMMA t+=star_test[$expr::ctype])*
+        | (options {greedy=true;}:COMMA t+=star_namedexpr[$expr::ctype])*
            {
                etype = new org.python.antlr.ast.List($lbrack, actions.castExprs($t), $expr::ctype);
            }
@@ -1852,13 +1865,13 @@ testlist_gexp
         $testlist_gexp.tree = etype;
     }
 }
-    : t+=star_test[$expr::ctype]
-        ( (options {k=2;}: c1=COMMA t+=star_test[$expr::ctype])* (c2=COMMA)?
+    : t+=star_namedexpr[$expr::ctype]
+        ( (options {k=2;}: c1=COMMA t+=star_namedexpr[$expr::ctype])* (c2=COMMA)?
          { $c1 != null || $c2 != null }? 
            {
                etype = new Tuple($testlist_gexp.start, actions.castExprs($t), $expr::ctype);
            }
-        | -> star_test
+        | -> star_namedexpr
         | (comp_for[gens]
            {
                Collections.reverse(gens);
@@ -1957,9 +1970,9 @@ subscript
       {
           $sltype = actions.makeSubscript(null, $c2, $upper2.tree, $sliceop.tree);
       }
-    | test[expr_contextType.Load]
+    | namedexpr_test[expr_contextType.Load]
       {
-          $sltype = new Index($test.start, actions.castExpr($test.tree));
+          $sltype = new Index($namedexpr_test.start, actions.castExpr($namedexpr_test.tree));
       }
     ;
 
@@ -1987,6 +2000,11 @@ sliceop
 star_expr[expr_contextType ctype]
 @after { $star_expr.tree = new Starred($star_expr.start, actions.castExpr($operand.tree), ctype); }
     : STAR operand=expr[ctype]
+    ;
+
+star_namedexpr[expr_contextType ctype]
+    : star_expr[ctype] -> star_expr
+    | namedexpr_test[ctype] -> namedexpr_test
     ;
 
 star_test[expr_contextType ctype]
@@ -2063,41 +2081,29 @@ dictorsetmaker[Token lcurly]
       {
           etype = new Dict($lcurly, dictKeys, dictValues);
       }
-    | k+=star_test[expr_contextType.Load]
-         (
-             (COLON v+=test[expr_contextType.Load]
-               ( comp_for[gens]
-                 {
-                     Collections.reverse(gens);
-                     List<comprehension> c = gens;
-                     etype = new DictComp($dictorsetmaker.start, actions.castExpr($k.get(0)), actions.castExpr($v.get(0)), c);
-                 }
-               | {
-                     dictKeys.add(actions.castExpr($k.get(0)));
-                     dictValues.add(actions.castExpr($v.get(0)));
-                 }
-                 (options {k=2;}: COMMA dict_item[dictKeys, dictValues])*
-                 {
-                     etype = new Dict($lcurly, dictKeys, dictValues);
-                 }
-               )
-             |(COMMA k+=star_test[expr_contextType.Load])*
-              {
-                  etype = new Set($lcurly, actions.castExprs($k));
-              }
-             )
-             (COMMA)?
-         | comp_for[gens]
-           {
-               Collections.reverse(gens);
-               List<comprehension> c = gens;
-               expr e = actions.castExpr($k.get(0));
-               if (e instanceof Context) {
-                   ((Context)e).setContext(expr_contextType.Load);
-               }
-               etype = new SetComp($lcurly, actions.castExpr($k.get(0)), c);
-           }
-         )
+    | (test[null] COLON) => key=test[expr_contextType.Load] COLON value=test[expr_contextType.Load]
+      ( comp_for[gens]
+        {
+            Collections.reverse(gens);
+            etype = new DictComp($dictorsetmaker.start, actions.castExpr($key.tree),
+                actions.castExpr($value.tree), gens);
+        }
+      | {
+            dictKeys.add(actions.castExpr($key.tree));
+            dictValues.add(actions.castExpr($value.tree));
+        }
+        (options {k=2;}: COMMA dict_item[dictKeys, dictValues])*
+        { etype = new Dict($lcurly, dictKeys, dictValues); } COMMA?
+      )
+    | k+=star_namedexpr[expr_contextType.Load]
+      ( comp_for[gens]
+        {
+            Collections.reverse(gens);
+            etype = new SetComp($dictorsetmaker.start, actions.castExpr($k.get(0)), gens);
+        }
+      | (options {k=2;}: COMMA k+=star_namedexpr[expr_contextType.Load])*
+        { etype = new Set($lcurly, actions.castExprs($k)); } COMMA?
+      )
     ;
 
 // The ** operand is expr: conditionals and lambdas must be parenthesized.
@@ -2147,7 +2153,7 @@ class_base
 @after { $class_base.tree = etype; }
     : STAR operand=test[expr_contextType.Load]
       { etype = new Starred($class_base.start, actions.castExpr($operand.tree), expr_contextType.Load); }
-    | plain=test[expr_contextType.Load]
+    | plain=namedexpr_test[expr_contextType.Load]
       { etype = actions.castExpr($plain.tree); }
     ;
 
@@ -2185,7 +2191,7 @@ argument[List arguments, List<keyword> kws, List gens]
       {
           kws.add(new keyword($DOUBLESTAR, null, actions.castExpr($mapping.tree)));
       }
-    | t1=test[expr_contextType.Load]
+    | t1=namedexpr_test[expr_contextType.Load]
       ( ASSIGN t2=test[expr_contextType.Load]
         {
             expr key = actions.castExpr($t1.tree);
@@ -2340,6 +2346,8 @@ RPAREN    : ')' {implicitLineJoiningLevel--;} ;
 LBRACK    : '[' {implicitLineJoiningLevel++;} ;
 
 RBRACK    : ']' {implicitLineJoiningLevel--;} ;
+
+COLONEQUAL : ':=' ;
 
 COLON     : ':' ;
 
