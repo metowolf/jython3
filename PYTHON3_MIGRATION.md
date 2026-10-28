@@ -6,9 +6,9 @@ The native JVM migration target is **Python 3.15.2**, retaining Java
 interoperability. That goal is **not complete**. This working tree implements
 native function-syntax, nonlocal-scope, exception-chaining, f-string,
 extended iterable-unpacking, mapping-display unpacking, generalized
-call-unpacking, and iterable class-base stages on the existing Jython 2.7 runtime.
-It is not Jython 3, is not a Python 3 compatibility mode, and does not make
-arbitrary Python 3 packages runnable.
+call-unpacking, iterable class-base, and expression-decorator stages on the
+existing Jython 2.7 runtime. It is not Jython 3, is not a Python 3 compatibility
+mode, and does not make arbitrary Python 3 packages runnable.
 
 The project version remains 2.7.5b2-DEV. The bundled library is still based on
 `lib-python/2.7` and `Lib`. Python 2 syntax is deliberately retained during
@@ -417,13 +417,76 @@ recorded indexer reference failure and no timeouts. See
 fixes, skipped coverage and the unresolved failure. This is not complete native
 Python 3.15.2 compatibility.
 
+## Implemented expression decorators
+
+Following PEP 614's relaxed decorator syntax, `@` accepts one expression from
+the current native language rather than only a dotted name with one optional
+call. Functions and classes use the same rule:
+
+```python
+def keep(value):
+    return value
+
+decorators = [keep]
+@decorators[0]
+def answer():
+    return 42
+
+@keep if True else missing
+class Example(object):
+    pass
+```
+
+Parenthesized expressions, subscripts and slices, chained calls and attributes,
+lambdas (also unparenthesized), conditionals, boolean/binary expressions,
+comprehensions, and the already-supported iterable/mapping displays and calls
+can produce a decorator. A comma-separated tuple must be parenthesized; a bare
+star is not a decorator. Non-callable expression results fail at application
+time, not during parsing. Existing simple and dotted decorators still work.
+
+Decorator expressions evaluate once, top-to-bottom, in the enclosing scope,
+before function defaults or class bases/body. Application is bottom-to-top;
+failures retain an existing definition-name binding. This reuses the existing
+native compiler and `PyObject.__call__` path, including Java methods, Java
+collection lookup, object identity and decorated Java subclasses/interfaces.
+Parenthesized `yield` expressions can suspend an enclosing generator during
+decorator evaluation. Typed locals and frame array traversal retain partially
+evaluated decorators across subsequent decorators, defaults and class bases.
+
+The AST retains the existing `decorator_list` of expression nodes and definition
+fields. Scope analysis now rejects null decorators and non-Load root contexts,
+as well as misplaced bare stars, even in unreachable definitions; this is not a
+complete recursive validator for every legacy expression node. Interactive input
+uses the same relaxed rule. The indexer retains class decorator lists, resolves
+them in the enclosing scope, and visits both function and class decorators.
+Class index AST serialization is versioned to reject old caches that omit those
+lists; the existing cache loader reparses source. Decorator replacement/type
+inference and complete modern-expression support in the indexer are not claimed.
+
+This does not implement assignment expressions, matrix multiplication,
+`async`/`await`, `yield from`, modern comprehension scopes, deferred annotations
+or the full Python 3 object model. These limits also apply inside decorators.
+It is a syntax migration, not full PEP 614 support for every modern expression.
+No runtime ABI or native AST layout change is needed: compiled-module API stays
+**46**.
+
+All 39 new native Python cases passed. On CPython 3.15.2, 33 shared cases passed
+and 6 JVM-specific cases were skipped. Standard and fresh builds passed all 42
+selected Java cases. The broad native regression selected 46 modules: 45 passed
+and `test_descr` retained its existing skip, with no failures. The complete Java
+driver reported 34,872 cases with one previously recorded indexer reference
+failure and no timeouts; it is not all green. A separate fresh JAR-based run
+passed 125 cases including the indexer, but does not establish that failure as
+fixed. See [decorator validation](Doc/native-decorators-validation.md) for
+commands, classpath differences and remaining boundaries.
+
 ## Build and test
 
 From the repository root, with a JDK and Apache Ant installed:
 
 ```sh
 ant jar copy-dev compile-test jar-test
-java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest
+java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest org.python.core.DecoratorExpressionTest
 ```
 
 The classpath separator above is for Linux/macOS; use `;` on Windows. In the
@@ -444,10 +507,10 @@ Java test classes must be on the classpath for `test_exceptions_jy` as well.
 Run the related Python regression set with:
 
 ```sh
-java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
+java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_decorator_expressions test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
 ```
 
-This selects 45 modules, including the expanded class and GC regression set.
+This selects 46 modules, including expression decorators and the class/GC set.
 The legacy `test_descr` module is currently skipped because it imports removed
 `test.test_support.verify`/`vereq` helpers; it is already listed in the existing
 Jython skip expectations. It must not be counted as a passing module. Run

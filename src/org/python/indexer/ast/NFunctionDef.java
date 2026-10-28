@@ -248,6 +248,7 @@ public class NFunctionDef extends NNode {
     public void visit(NNodeVisitor v) {
         if (v.visit(this)) {
             visitNode(name, v);
+            visitNodeList(decoratorList, v);
             visitNodeList(args, v);
             visitNodeList(defaults, v);
             visitNode(kwargs, v);

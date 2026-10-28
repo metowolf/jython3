@@ -404,10 +404,12 @@ public class AstConverter extends Visitor {
         for (expr base : n.getInternalBases()) {
             bases.add(convExpr(base instanceof Starred ? ((Starred)base).getInternalValue() : base));
         }
-        return new NClassDef((NName)convExpr(n.getInternalNameNode()),
+        NClassDef cls = new NClassDef((NName)convExpr(n.getInternalNameNode()),
                              bases,
                              convertListStmt(n.getInternalBody()),
                              start(n), stop(n));
+        cls.setDecoratorList(convertListExpr(n.getInternalDecorator_list()));
+        return cls;
     }
 
     @Override

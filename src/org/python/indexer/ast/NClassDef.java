@@ -19,11 +19,13 @@ import java.util.List;
 
 public class NClassDef extends NNode {
 
-    static final long serialVersionUID = 7513873538009667540L;
+    // Reject cached class ASTs that predate decorator retention; AstCache reparses them.
+    static final long serialVersionUID = 2L;
 
     public NName name;
     public List<NNode> bases;
     public NBody body;
+    private List<NNode> decoratorList;
 
     public NClassDef(NName name, List<NNode> bases, NBlock body) {
         this(name, bases, body, 0, 1);
@@ -36,6 +38,18 @@ public class NClassDef extends NNode {
         this.body = new NBody(body);
         addChildren(name, this.body);
         addChildren(bases);
+    }
+
+    public void setDecoratorList(List<NNode> decorators) {
+        decoratorList = decorators;
+        addChildren(decorators);
+    }
+
+    public List<NNode> getDecoratorList() {
+        if (decoratorList == null) {
+            decoratorList = new ArrayList<NNode>();
+        }
+        return decoratorList;
     }
 
     @Override
@@ -64,6 +78,8 @@ public class NClassDef extends NNode {
 
     @Override
     public NType resolve(Scope s) throws Exception {
+        // Decorators belong to the enclosing scope, not the class namespace.
+        resolveList(decoratorList, s);
         NClassType thisType = getType().asClassType();
         List<NType> baseTypes = new ArrayList<NType>();
         for (NNode base : bases) {
@@ -102,6 +118,7 @@ public class NClassDef extends NNode {
     public void visit(NNodeVisitor v) {
         if (v.visit(this)) {
             visitNode(name, v);
+            visitNodeList(decoratorList, v);
             visitNodeList(bases, v);
             visitNode(body, v);
         }

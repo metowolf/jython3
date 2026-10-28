@@ -143,15 +143,22 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         cur.addBound(name);
     }
 
+    private void visitDecorators(List<expr> decorators, PythonTree owner) throws Exception {
+        for (expr decorator : decorators) {
+            if (decorator == null || expressionContext(decorator) != expr_contextType.Load) {
+                code_compiler.error("decorator must have a value in Load context", true, owner);
+            }
+            visit(decorator);
+        }
+    }
+
     @Override
     public Object visitFunctionDef(FunctionDef node) throws Exception {
         def(node.getInternalName());
         ArgListCompiler ac = new ArgListCompiler();
         ac.visitArgs(node.getInternalArgs());
 
-        for (expr decorator : node.getInternalDecorator_list()) {
-            visit(decorator);
-        }
+        visitDecorators(node.getInternalDecorator_list(), node);
         for (expr value : ac.getDefaults()) {
             visit(value);
         }
@@ -572,9 +579,7 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
 
     @Override
     public Object visitClassDef(ClassDef node) throws Exception {
-        for (expr decorator : node.getInternalDecorator_list()) {
-            visit(decorator);
-        }
+        visitDecorators(node.getInternalDecorator_list(), node);
         def(node.getInternalName());
         for (expr base : node.getInternalBases()) {
             expr value = base;

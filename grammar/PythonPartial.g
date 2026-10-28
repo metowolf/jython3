@@ -249,16 +249,9 @@ attr
     | YIELD
     ;
 
-//decorator: '@' dotted_name [ '(' [arglist] ')' ] NEWLINE
+// Match the full parser's expression decorators and incomplete input.
 decorator
-    : AT dotted_attr
-    ( LPAREN
-      ( arglist
-      |
-      )
-      RPAREN
-    |
-    ) NEWLINE
+    : AT test NEWLINE
     ;
 
 //decorators: decorator+

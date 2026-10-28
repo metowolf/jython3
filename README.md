@@ -14,10 +14,13 @@ function annotations, keyword-only and positional-only parameters, `nonlocal`,
 exception chaining (`raise ... from ...`), PEP 498 f-strings with debug fields,
 extended assignment unpacking, iterable unpacking in list/tuple/set displays,
 dictionary `**mapping` displays, generalized multiple `*args`/`**kwargs`
-function calls, and iterable class bases such as `class C(*bases, Other, *more)`.
+function calls, iterable class bases such as `class C(*bases, Other, *more)`,
+and expression decorators such as `@decorators[0]` or `@a if enabled else b`.
 Call expansion preserves Java interoperation and rejects duplicate keywords
-rather than overwriting them. Class-header keywords and the full Python 3
-metaclass protocol are not implemented.
+rather than overwriting them. Decorators use the existing native expression
+language; assignment expressions, matrix multiplication and `async`/`await`
+remain unsupported. Class-header keywords and the full Python 3 metaclass
+protocol are not implemented.
 It is **not a complete Python 3 implementation**; the runtime and standard library
 are still based on Python 2.7. Python 3.12's PEP 701 f-string extensions are not
 implemented. Some Python 2 behaviors deliberately change, including closure-cell

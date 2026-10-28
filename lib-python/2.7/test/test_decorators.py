@@ -152,14 +152,15 @@ class TestDecorators(unittest.TestCase):
         self.assertEqual(counts['double'], 4)
 
     def test_errors(self):
-        # Test syntax restrictions - these are all compile-time errors:
-        #
+        # Native expression decorators compile, then fail if not callable.
         for expr in [ "1+2", "x[3]", "(1, 2)" ]:
-            # Sanity check: is expr is a valid expression by itself?
             compile(expr, "testexpr", "exec")
-
             codestr = "@%s\ndef f(): pass" % expr
-            self.assertRaises(SyntaxError, compile, codestr, "test", "exec")
+            if test_support.is_jython:
+                code = compile(codestr, "test", "exec")
+                self.assertRaises(TypeError, eval, code, {'x': [0, 0, 0, 0]})
+            else:
+                self.assertRaises(SyntaxError, compile, codestr, "test", "exec")
 
         # You can't put multiple decorators on a single line:
         #

@@ -1234,4 +1234,80 @@ public class IndexerTest extends TestBase {
         assertFunctionBinding("deco.foo");
         assertCall("deco.deco1", nthIndexOf(src, "deco1", 2));
     }
+
+    public void testFunctionDecoratorExpressionReferences() throws Exception {
+        String src = index("function_deco.py",
+            "def identity(value): return value",
+            "registry = [identity]",
+            "enabled = True",
+            "@registry[0] if enabled else identity",
+            "def f(): pass");
+        assertFunctionBinding("function_deco.f");
+        assertReference("function_deco.registry", src.lastIndexOf("registry"));
+        assertReference("function_deco.enabled", src.lastIndexOf("enabled"));
+        assertReference("function_deco.identity", src.lastIndexOf("identity"));
+        NFunctionDef function = (NFunctionDef)idx.getAstForFile("function_deco.py").body.seq.get(3);
+        final java.util.List<Integer> offsets = new java.util.ArrayList<Integer>();
+        function.visit(new org.python.indexer.ast.DefaultNodeVisitor() {
+            @Override
+            public boolean visit(NName name) {
+                if (name.id.equals("registry")) offsets.add(name.start());
+                return true;
+            }
+        });
+        assertEquals(java.util.Arrays.asList(src.lastIndexOf("registry")), offsets);
+    }
+
+    public void testClassDecoratorExpressionReferencesAndVisitor() throws Exception {
+        String src = index("class_deco.py",
+            "def identity(value): return value",
+            "registry = [identity]",
+            "enabled = True",
+            "@registry[0]",
+            "@identity if enabled else registry[0]",
+            "class C(object):",
+            "    enabled = False");
+        assertClassBinding("class_deco.C");
+        assertReference("class_deco.registry", nthIndexOf(src, "registry", 2));
+        assertReference("class_deco.registry", nthIndexOf(src, "registry", 3));
+        assertReference("class_deco.identity", src.lastIndexOf("identity"));
+        assertReference("class_deco.enabled", nthIndexOf(src, "enabled", 2));
+        NModule module = idx.getAstForFile("class_deco.py");
+        NClassDef cls = (NClassDef)module.body.seq.get(3);
+        assertEquals(2, cls.getDecoratorList().size());
+        assertTrue(cls.getDecoratorList().get(0) instanceof NSubscript);
+        assertTrue(cls.getDecoratorList().get(1) instanceof NIfExp);
+        for (NNode decorator : cls.getDecoratorList()) {
+            assertSame(cls, decorator.getParent());
+        }
+        final java.util.List<Integer> offsets = new java.util.ArrayList<Integer>();
+        cls.visit(new org.python.indexer.ast.DefaultNodeVisitor() {
+            @Override
+            public boolean visit(NName name) {
+                if (name.id.equals("registry")) offsets.add(name.start());
+                return true;
+            }
+        });
+        assertEquals(2, offsets.size());
+        assertTrue(offsets.contains(nthIndexOf(src, "registry", 2)));
+        assertTrue(offsets.contains(nthIndexOf(src, "registry", 3)));
+    }
+
+    public void testClassDecoratorSerialization() throws Exception {
+        index("serialized_deco.py", "@registry[0]", "class C(object): pass");
+        NModule module = idx.getAstForFile("serialized_deco.py");
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.ObjectOutputStream stream = new java.io.ObjectOutputStream(bytes)) {
+            stream.writeObject(module);
+        }
+        NModule restored;
+        try (java.io.ObjectInputStream stream = new java.io.ObjectInputStream(
+                new java.io.ByteArrayInputStream(bytes.toByteArray()))) {
+            restored = (NModule)stream.readObject();
+        }
+        NClassDef cls = (NClassDef)restored.body.seq.get(0);
+        assertEquals(1, cls.getDecoratorList().size());
+        assertTrue(cls.getDecoratorList().get(0) instanceof NSubscript);
+        assertSame(cls, cls.getDecoratorList().get(0).getParent());
+    }
 }
