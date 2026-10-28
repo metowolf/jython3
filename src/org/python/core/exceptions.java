@@ -137,8 +137,30 @@ public class exceptions extends PyObject implements ClassDictInit {
 
         buildClass(dict, "BufferError", "StandardError", "Buffer error.");
 
-        buildClass(dict, "StopIteration", "Exception",
-                   "Signal the end from iterator.next().");
+        PyObject stopDict = new PyStringMap();
+        stopDict.__setitem__("__init__", bindStaticJavaMethod("__init__", "StopIteration__init__"));
+        PyDataDescr stopValue = new PyDataDescr("value", PyObject.class, "generator return value") {
+            @Override
+            public Object invokeGet(PyObject object) {
+                return ((PyBaseException)object).stopIterationValue;
+            }
+            @Override
+            public void invokeSet(PyObject object, Object value) {
+                ((PyBaseException)object).stopIterationValue = (PyObject)value;
+            }
+            @Override
+            public void invokeDelete(PyObject object) {
+                ((PyBaseException)object).stopIterationValue = Py.None;
+            }
+            @Override
+            public boolean implementsDescrSet() { return true; }
+            @Override
+            public boolean implementsDescrDelete() { return true; }
+        };
+        stopDict.__setitem__("value", stopValue);
+        PyType stopType = (PyType)buildClass(dict, "StopIteration", "Exception", stopDict,
+                "Signal the end from iterator.next().");
+        stopValue.setType(stopType);
 
         buildClass(dict, "GeneratorExit", "BaseException", "Request that a generator exit.");
 
@@ -184,6 +206,11 @@ public class exceptions extends PyObject implements ClassDictInit {
         // Initialize ZipImportError here, where it's safe to; it's needed immediately
         zipimport.initClassExceptions(dict);
         _locale.initClassExceptions(dict);
+    }
+
+    public static void StopIteration__init__(PyObject self, PyObject[] args, String[] kwargs) {
+        PyBaseException.TYPE.invoke("__init__", self, args, kwargs);
+        ((PyBaseException)self).stopIterationValue = args.length == 0 ? Py.None : args[0];
     }
 
     public static PyObject SyntaxError() {

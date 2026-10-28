@@ -6,9 +6,10 @@ The native JVM migration target is **Python 3.15.2**, retaining Java
 interoperability. That goal is **not complete**. This working tree implements
 native function-syntax, nonlocal-scope, exception-chaining, f-string,
 extended iterable-unpacking, mapping-display unpacking, generalized
-call-unpacking, iterable class-base, expression-decorator, matrix-operator and
-assignment-expression stages on the existing Jython 2.7 runtime. It is not Jython 3, is not a Python 3 compatibility
-mode, and does not make arbitrary Python 3 packages runnable.
+call-unpacking, iterable class-base, expression-decorator, matrix-operator,
+assignment-expression and generator-delegation stages on the existing Jython 2.7
+runtime. It is not Jython 3, is not a Python 3 compatibility mode, and does not
+make arbitrary Python 3 packages runnable.
 
 The project version remains 2.7.5b2-DEV. The bundled library is still based on
 `lib-python/2.7` and `Lib`. Python 2 syntax is deliberately retained during
@@ -465,7 +466,8 @@ inference and complete modern-expression support in the indexer are not claimed.
 
 The decorator stage did not implement matrix multiplication or assignment
 expressions; later stages below add them, including inside decorators.
-`async`/`await`, `yield from`, modern comprehension scopes, deferred annotations
+Generator delegation is implemented in its own later stage below.
+`async`/`await`, modern comprehension scopes, deferred annotations
 and the full Python 3 object model remain outstanding, including inside
 decorators. This is not full PEP 614 support for every modern expression.
 The decorator stage needed no runtime ABI or native AST layout change and kept
@@ -622,9 +624,83 @@ passed all 45 cases. The final broad native regression selected **51** modules:
 reported **34,890** cases, no failures or timeouts; 59 of 60 classes passed and
 one had no runnable cases. All 88 indexer cases passed. See
 [assignment-expression validation](Doc/native-namedexpr-validation.md) for
-commands, fixes and boundaries. Compiled-module API is now **48** for the new
-syntax/AST and corrected suspended-stack behavior. Standard-library upgrading,
+commands, fixes and boundaries. This stage used compiled-module API **48** for
+the new syntax/AST and corrected suspended-stack behavior; the next stage uses
+**49**. Standard-library upgrading,
 complete Python 3 scopes and the optional CPython backend remain separate work.
+
+## Implemented generator delegation
+
+The native JVM compiler supports `yield from iterable` and generator return
+values, without source translation or forwarding execution to CPython:
+
+```python
+def inner():
+    received = yield "ready"
+    return received
+
+def outer():
+    result = yield from inner()
+    yield result
+
+generator = outer()
+assert next(generator) == "ready"
+assert generator.send(42) == 42
+```
+
+The operand and its iterator are evaluated once. Delegation forwards next,
+non-None sends, exception arguments/traceback and close calls. StopIteration
+from an invoked iterator method completes the expression with its internal
+`value`. Following CPython 3.15's CLEANUP_THROW behavior, an injected
+StopIteration with no delegate throw method, or one raised by a delegate close
+call, also completes delegation. Ordinary failures remain catchable by the outer
+generator. GeneratorExit calls the delegate's close rather than its throw.
+Failed throw attribute lookup leaves the delegator suspended; failed close
+attribute lookup is reported as unraisable and closing continues. Reentrant
+send/throw/close is rejected before modifying the paused frame's input.
+
+`return value` now terminates a native generator with StopIteration.value;
+returning a tuple preserves it as one object, not several exception arguments.
+The StopIteration value is stored independently of args and the instance dict,
+is GC-visible, and is not replaced by a subclass's Python property when fetching
+a delegation result. A generator that catches GeneratorExit and returns a value
+returns it from close, matching the covered CPython 3.15.2 behavior. A delegate's
+close return is ignored. Generators expose read-only `gi_yieldfrom` and a
+`__next__` alias in addition to the legacy `next` method.
+
+The compiler uses a native state helper in a typed saved local, preserving
+pending expressions and augmented-assignment targets across suspension. A
+pending generator return also uses a typed local, so a suspending finally block
+cannot lose its return value or GC reference. Completion clears delegation and
+saved-frame references. Java tests isolate these edges from ordinary locals.
+`ast.YieldFrom(value)` has visitor, subtype, location and GC support. The indexer
+retains the operand references and parent links, but conservatively assigns an
+unknown result type instead of claiming generator-return inference.
+
+**Boundaries:** PEP 479 is not enabled; explicit StopIteration escaping a native
+generator retains the legacy termination behavior. Yield-from anywhere inside a
+comprehension is conservatively rejected with a modern-comprehension-scopes
+message, including first iterable clauses and nested lambdas that CPython may
+allow. This avoids silently inheriting Python 2 scope behavior. General iterator
+migration from next to __next__, coroutine/async-generator support, recursive
+modern AST validation, and alternate legacy bytecode execution are not covered.
+The new delegation path understands __next__, legacy next and Java iterators;
+this does not modernize every iterator entry point in the runtime.
+
+The new Python suite has **51** cases: all pass natively; exact CPython 3.15.2
+passes **45** shared cases and skips **6** JVM-specific cases. The selected Java
+suite passes **152** cases, including seven new runtime/AST/GC cases and two new
+indexer cases. An independent fresh build compiled **922** production and **146**
+Java test sources; its selected Java and native Python runs also passed **152**
+and **51** cases, respectively. The complete Java driver reported **34,899**
+passing cases, with **60** of **61** classes passing and one reporting no cases;
+there were no failures or timeouts. The **53**-module native regression passed
+**52** modules and retained the existing `test_descr` import skip. Overlapping
+runs are not summed, and skipped/no-case entries are not counted as passes.
+Details and commands are in the
+[yield-from validation report](Doc/native-yieldfrom-validation.md).
+Compiled-module API is now **49** for new yield-from helpers and generator
+return/paused-frame behavior. The project language version is still 2.7.5b2-DEV.
 
 ## Build and test
 
@@ -632,7 +708,7 @@ From the repository root, with a JDK and Apache Ant installed:
 
 ```sh
 ant jar copy-dev compile-test jar-test
-java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest org.python.core.DecoratorExpressionTest org.python.core.MatmulTest org.python.core.NamedExpressionTest
+java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest org.python.core.DecoratorExpressionTest org.python.core.MatmulTest org.python.core.NamedExpressionTest org.python.core.YieldFromTest
 ```
 
 The classpath separator above is for Linux/macOS; use `;` on Windows. In the
@@ -653,11 +729,11 @@ Java test classes must be on the classpath for `test_exceptions_jy` as well.
 Run the related Python regression set with:
 
 ```sh
-java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_named_expressions test_python3_matmul test_operator test_tokenize test_augassign test_python3_decorator_expressions test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
+java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_yield_from test_python3_named_expressions test_python3_matmul test_operator test_tokenize test_augassign test_python3_decorator_expressions test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_generators_jy test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
 ```
 
-This selects 51 modules, adding assignment expressions to the previous
-50-module matrix/operator/tokenizer/augmented-assignment and class/GC set.
+This selects 53 modules, adding yield-from and the Jython-specific generator
+suite to the previous 51-module assignment-expression and class/GC set.
 The legacy `test_descr` module is currently skipped because it imports removed
 `test.test_support.verify`/`vereq` helpers; it is already listed in the existing
 Jython skip expectations. It must not be counted as a passing module. Run
@@ -712,6 +788,7 @@ The AST is transitional, not the CPython 3 AST:
 - `kw_defaults` has one entry per keyword-only parameter. AST `None` means required; an expression evaluating to Python `None` is an actual default.
 - `Nonlocal(names)` is a new statement node with visitor and Python subtype support.
 - `NamedExpr(target, value)` binds a Store-context Name and produces its Load-context value; it includes visitor, Python subtype and GC support.
+- `YieldFrom(value)` delegates to an iterator; it includes visitor, Python subtype and GC support.
 - `Raise` keeps `type`, `inst`, and `tback`, then adds `cause`; it is not the CPython 3 `Raise(exc, cause)` layout.
 - `JoinedStr(values)` and `FormattedValue(value, conversion, format_spec)` are new expression nodes with visitor, Python subtype and GC support. `conversion` is `-1` or the ordinal of `s`, `r`, or `a`; absent `format_spec` is Python `None`. Literal parts remain `Str`, not modern `Constant` nodes.
 - `Starred(value, ctx)` represents extended assignment, iterable display, call and class-base unpacking. It has visitor, Python subtype and GC support.
@@ -742,14 +819,15 @@ Parameter slots are positional-only, positional-or-keyword, keyword-only,
 optional `*args`, then optional `**kwargs`. Old Java code factories remain
 available; a new overload carries the additional parameter counts.
 
-The compiled-module API version is now **48**: stage 40 introduced function
+The compiled-module API version is now **49**: stage 40 introduced function
 metadata and setters; stage 41 introduced closure deletion and exception-state
 helpers; stage 42 added f-string runtime helpers; stage 43 added iterable
 unpacking helpers; stage 44 added mapping-display merging helpers; stage 45
 added the generalized call accumulator and invocation helpers; stage 46
 invalidates caches for the new class-base parsing and decorator evaluation order;
 stage 47 adds the native matrix-dispatch entry points; stage 48 adds assignment
-expressions and corrects suspended operand-stack handling.
+expressions and corrects suspended operand-stack handling; stage 49 adds
+yield-from helpers and generator-return/paused-frame behavior.
 This is a bytecode/cache compatibility number, not a Python language version.
 Rebuild compiled-only modules and regenerate source-backed `$py.class` caches.
 Do not bypass API checks to exchange caches with an older runtime.
@@ -761,7 +839,7 @@ the native path must meet it without forwarding execution to CPython. Full
 version-specific acceptance tests remain to be established. Outstanding work
 includes:
 
-- `yield from`, class-header keywords and mapping expansion, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions inside comprehensions, and Python 3.12 PEP 701 f-string extensions.
+- Yield-from inside comprehensions, PEP 479, class-header keywords and mapping expansion, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions inside comprehensions, and Python 3.12 PEP 701 f-string extensions.
 - Pattern matching, exception groups, type parameters, deferred annotation semantics, and the other language/library changes through Python 3.15.2.
 - Removal or isolation of Python 2-only syntax such as tuple parameters, `print`/`exec` statements, backticks, and old exception forms.
 - Python 3 string/bytes, integer and division, iteration, import, class/metaclass, exception, and comprehension semantics.

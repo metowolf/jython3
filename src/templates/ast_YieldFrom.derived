@@ -1,0 +1,4 @@
+base_class: YieldFrom
+want_dict: true
+ctr
+incl: object

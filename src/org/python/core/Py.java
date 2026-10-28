@@ -316,6 +316,13 @@ public final class Py extends PrePy {
     public static PyException StopIteration(String message) {
         return new PyException(Py.StopIteration, message);
     }
+    /** A generator result is a single argument even when it is a tuple. */
+    public static PyException StopIterationValue(PyObject value) {
+        PyObject exception = value == Py.None ? StopIteration.__call__()
+                : StopIteration.__call__(value);
+        return new PyException(StopIteration, exception);
+    }
+
     public static PyObject GeneratorExit;
 
     public static PyException GeneratorExit(String message) {

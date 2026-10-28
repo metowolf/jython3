@@ -38,14 +38,34 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
         return gi_code.co_name;
     }
 
+    @ExposedGet(name = "gi_yieldfrom")
+    public PyObject getYieldFrom() {
+        return gi_frame == null || gi_running || gi_frame.f_yieldfrom == null
+                ? Py.None : gi_frame.f_yieldfrom;
+    }
+
+    private void checkRunning() {
+        if (gi_running) throw Py.ValueError("generator already executing");
+    }
+
+    private void clearFrame() {
+        if (gi_frame != null) {
+            gi_frame.f_yieldfrom = null;
+            gi_frame.f_savedlocals = null;
+            gi_frame.setGeneratorInput(Py.None);
+        }
+        gi_frame = null;
+    }
+
     public PyObject send(PyObject value) {
         return generator_send(value);
     }
 
     @ExposedMethod
     final PyObject generator_send(PyObject value) {
+        checkRunning();
         if (gi_frame == null) {
-            throw Py.StopIteration("");
+            throw new PyException(Py.StopIteration);
         }
         if (gi_frame.f_lasti == 0 && value != Py.None) {
             throw Py.TypeError("can't send non-None value to a just-started generator");
@@ -60,10 +80,32 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
 
     @ExposedMethod(names="throw", defaults={"null", "null"})
     final PyObject generator_throw$(PyObject type, PyObject value, PyObject tb) {
+        checkRunning();
+        PyObject[] arguments = tb != null ? new PyObject[] {type, value, tb}
+                : value != null ? new PyObject[] {type, value} : new PyObject[] {type};
         if (tb == Py.None) {
             tb = null;
         } else if (tb != null && !(tb instanceof PyTraceback)) {
             throw Py.TypeError("throw() third argument must be a traceback object");
+        }
+        PyObject exceptionType = type instanceof PyBaseException ? type.getType() : type;
+        boolean closing = exceptionType instanceof PyType
+                && ((PyType)exceptionType).isSubType((PyType)Py.GeneratorExit);
+        if (gi_frame != null && gi_frame.f_yieldfrom != null && !closing) {
+            // Do not construct the exception before forwarding. Each delegating
+            // level must preserve raw arguments without repeating __init__.
+            PyObject method;
+            gi_running = true;
+            try {
+                method = YieldFromSupport.optional(gi_frame.f_yieldfrom, "throw");
+            } finally {
+                gi_running = false;
+            }
+            YieldFromSupport.InjectedException exception = method == null
+                    ? new YieldFromSupport.InjectedException(Py.makeException(type, value, tb), arguments)
+                    : new YieldFromSupport.InjectedException(arguments, method);
+            exception.prepared = true;
+            return raiseException(exception);
         }
         return raiseException(Py.makeException(type, value, tb));
     }
@@ -74,13 +116,13 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
 
     @ExposedMethod
     final PyObject generator_close() {
+        checkRunning();
         try {
             raiseException(Py.makeException(Py.GeneratorExit));
             throw Py.RuntimeError("generator ignored GeneratorExit");
         } catch (PyException e) {
-            if (!(e.type == Py.StopIteration || e.type == Py.GeneratorExit)) {
-                throw e;
-            }
+            if (e.match(Py.StopIteration)) return YieldFromSupport.stopValue(e);
+            if (!e.match(Py.GeneratorExit)) throw e;
         }
         return Py.None;
     }
@@ -92,7 +134,14 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
 
     @ExposedMethod(doc="x.next() -> the next value, or raise StopIteration")
     final PyObject generator_next() {
-        return super.next();
+        PyObject value = __iternext__();
+        if (value == null && stopException == null) throw new PyException(Py.StopIteration);
+        return doNext(value);
+    }
+
+    @ExposedMethod(names = "__next__")
+    final PyObject generator___next__() {
+        return generator_next();
     }
 
     @Override
@@ -106,8 +155,9 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
     }
 
     private PyObject raiseException(PyException ex) {
+        checkRunning();
         if (gi_frame == null || gi_frame.f_lasti == 0) {
-            gi_frame = null;
+            clearFrame();
             throw ex;
         }
         gi_frame.setGeneratorInput(ex);
@@ -147,12 +197,13 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
         if (gi_running) {
             throw Py.ValueError("generator already executing");
         }
+        stopException = null;
         if (gi_frame == null) {
             return null;
         }
 
         if (gi_frame.f_lasti == -1) {
-            gi_frame = null;
+            clearFrame();
             return null;
         }
         gi_running = true;
@@ -160,18 +211,17 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
         try {
             result = gi_frame.f_code.call(state, gi_frame, closure);
         } catch (PyException pye) {
-            if (!(pye.type == Py.StopIteration || pye.type == Py.GeneratorExit)) {
-                gi_frame = null;
-                throw pye;
-            } else {
-                stopException = pye;
-                gi_frame = null;
-                return null;
-            }
+            clearFrame();
+            if (!pye.match(Py.StopIteration)) throw pye;
+            // Preserve legacy explicit StopIteration behavior; PEP 479 is separate.
+            stopException = pye;
+            return null;
         } finally {
             gi_running = false;
         }
-        if (result == Py.None && gi_frame.f_lasti == -1) {
+        if (gi_frame.f_lasti == -1) {
+            clearFrame();
+            if (result != Py.None) stopException = Py.StopIterationValue(result);
             return null;
         }
         return result;

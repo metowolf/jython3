@@ -382,7 +382,7 @@ From the Iterators list, about the types of these things.
 >>> type(i)
 <type 'generator'>
 >>> [s for s in dir(i) if not s.startswith('_')]
-['close', 'gi_code', 'gi_frame', 'gi_running', 'next', 'send', 'throw']
+['close', 'gi_code', 'gi_frame', 'gi_running', 'gi_yieldfrom', 'next', 'send', 'throw']
 >>> print i.next.__doc__
 x.next() -> the next value, or raise StopIteration
 >>> iter(i) is i
@@ -731,25 +731,30 @@ syntax_tests = """
 >>> def f(): #doctest: +IGNORE_EXCEPTION_DETAIL, +NORMALIZE_WHITESPACE
 ...     return 22
 ...     yield 1
-Traceback (most recent call last):
-  ..
-SyntaxError: 'return' with argument inside generator (<doctest test.test_generators.__test__.syntax[0]>, line 3)
+>>> g = f()
+>>> try:
+...     next(g)
+... except StopIteration as exc:
+...     print exc.value
+22
 
 >>> def f(): #doctest: +IGNORE_EXCEPTION_DETAIL, +NORMALIZE_WHITESPACE
 ...     yield 1
 ...     return 22
-Traceback (most recent call last):
-  ..
-SyntaxError: 'return' with argument inside generator (<doctest test.test_generators.__test__.syntax[1]>, line 3)
+>>> g = f()
+>>> next(g)
+1
+>>> try:
+...     next(g)
+... except StopIteration as exc:
+...     print exc.value
+22
 
-"return None" is not the same as "return" in a generator:
+Both bare return and return None terminate a generator with value None:
 
 >>> def f(): #doctest: +IGNORE_EXCEPTION_DETAIL, +NORMALIZE_WHITESPACE
 ...     yield 1
 ...     return None
-Traceback (most recent call last):
-  ..
-SyntaxError: 'return' with argument inside generator (<doctest test.test_generators.__test__.syntax[2]>, line 3)
 
 These are fine:
 
@@ -874,11 +879,9 @@ These are fine:
 ...         def f(i):
 ...             return 2*i      # or here
 ...         if 0:
-...             return 3        # but *this* sucks (line 8)
+...             return 3        # now permitted for generators too
 ...     if 0:
 ...         yield 2             # because it's a generator (line 10)
-Traceback (most recent call last):
-SyntaxError: 'return' with argument inside generator (<doctest test.test_generators.__test__.syntax[24]>, line 10)
 
 This one caused a crash (see SF bug 567538):
 
@@ -1528,9 +1531,6 @@ Traceback (most recent call last):
 SyntaxError: 'yield' outside function (<doctest test.test_generators.__test__.coroutine[21]>, line 1)
 
 >>> def f(): return lambda x=(yield): 1 #doctest: +IGNORE_EXCEPTION_DETAIL, +NORMALIZE_WHITESPACE
-Traceback (most recent call last):
-  ...
-SyntaxError: 'return' with argument inside generator (<doctest test.test_generators.__test__.coroutine[22]>, line 1)
 
 >>> def f(): x = yield = y #doctest: +IGNORE_EXCEPTION_DETAIL, +NORMALIZE_WHITESPACE
 Traceback (most recent call last):

@@ -664,7 +664,7 @@ public class GrammarActions {
             errorHandler.error("can't assign to number", e);
         } else if (e instanceof Str || e instanceof JoinedStr) {
             errorHandler.error("can't assign to string", e);
-        } else if (e instanceof Yield) {
+        } else if (e instanceof Yield || e instanceof org.python.antlr.ast.YieldFrom) {
             errorHandler.error("can't assign to yield expression", e);
         } else if (e instanceof BinOp) {
             errorHandler.error("can't assign to operator", e);

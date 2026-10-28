@@ -54,6 +54,7 @@ import org.python.antlr.ast.UnaryOp;
 import org.python.antlr.ast.While;
 import org.python.antlr.ast.With;
 import org.python.antlr.ast.Yield;
+import org.python.antlr.ast.YieldFrom;
 import org.python.antlr.ast.alias;
 import org.python.antlr.ast.arguments;
 import org.python.antlr.ast.boolopType;
@@ -698,6 +699,11 @@ public class AstConverter extends Visitor {
                          convExpr(n.getInternalContext_expr()),
                          convertListStmt(n.getInternalBody()),
                          start(n), stop(n));
+    }
+
+    @Override
+    public Object visitYieldFrom(YieldFrom n) throws Exception {
+        return new org.python.indexer.ast.NYieldFrom(convExpr(n.getInternalValue()), start(n), stop(n));
     }
 
     @Override

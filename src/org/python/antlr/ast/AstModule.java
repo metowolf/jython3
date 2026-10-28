@@ -86,6 +86,7 @@ public class AstModule implements ClassDictInit {
         dict.__setitem__("While", While.TYPE);
         dict.__setitem__("With", With.TYPE);
         dict.__setitem__("Yield", Yield.TYPE);
+        dict.__setitem__("YieldFrom", YieldFrom.TYPE);
         dict.__setitem__("alias", alias.TYPE);
         dict.__setitem__("arguments", arguments.TYPE);
         dict.__setitem__("comprehension", comprehension.TYPE);

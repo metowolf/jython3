@@ -35,6 +35,7 @@ import org.python.antlr.ast.SetComp;
 import org.python.antlr.ast.Tuple;
 import org.python.antlr.ast.With;
 import org.python.antlr.ast.Yield;
+import org.python.antlr.ast.YieldFrom;
 import org.python.antlr.ast.Starred;
 import org.python.antlr.ast.Attribute;
 import org.python.antlr.ast.Subscript;
@@ -398,7 +399,7 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     }
 
     private void checkDictTarget(expr target) throws Exception {
-        if (target instanceof NamedExpr) {
+        if (target instanceof NamedExpr || target instanceof YieldFrom) {
             code_compiler.error("assignment expression cannot be an assignment or deletion target", true, target);
         } else if (target instanceof Dict) {
             code_compiler.error("dict display cannot be an assignment or deletion target", true, target);
@@ -680,6 +681,13 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         // implement PEP 572 outer binding on top of incompatible legacy scopes.
         node.accept(new Visitor() {
             @Override
+            public Object visitYieldFrom(YieldFrom expression) throws Exception {
+                code_compiler.error("yield from inside comprehensions requires modern comprehension scopes",
+                        true, expression);
+                return null;
+            }
+
+            @Override
             public Object visitNamedExpr(NamedExpr expression) throws Exception {
                 code_compiler.error("assignment expressions in comprehensions require modern comprehension scopes",
                         true, expression);
@@ -711,6 +719,18 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     @Override
     public Object visitSetComp(SetComp node) throws Exception {
         return visitInternalGenerators(node, node.getInternalElt(), node.getInternalGenerators());
+    }
+
+    @Override
+    public Object visitYieldFrom(YieldFrom node) throws Exception {
+        expr value = node.getInternalValue();
+        if (value == null || expressionContext(value) != expr_contextType.Load) {
+            code_compiler.error("yield from requires an expression in Load context", true, node);
+        }
+        cur.defineAsGenerator(node);
+        cur.yield_count++;
+        traverse(node);
+        return null;
     }
 
     @Override

@@ -297,6 +297,10 @@ public class DefaultNodeVisitor implements NNodeVisitor {
     }
 
     @Override
+    public boolean visit(NYieldFrom n) {
+        return traverseIntoNodes;
+    }
+
     public boolean visit(NYield n) {
         return traverseIntoNodes;
     }

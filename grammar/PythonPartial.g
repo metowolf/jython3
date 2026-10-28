@@ -918,9 +918,9 @@ testlist1
     : test (COMMA test)*
     ;
 
-//yield_expr: 'yield' [testlist]
+//yield_expr: 'yield' ('from' test | [testlist])
 yield_expr
-    : YIELD testlist?
+    : YIELD (FROM test | testlist?)
     ;
 
 AS        : 'as' ;

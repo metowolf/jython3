@@ -148,6 +148,7 @@ import org.python.antlr.ast.UnaryOp;
 import org.python.antlr.ast.While;
 import org.python.antlr.ast.With;
 import org.python.antlr.ast.Yield;
+import org.python.antlr.ast.YieldFrom;
 import org.python.antlr.base.excepthandler;
 import org.python.antlr.base.expr;
 import org.python.antlr.base.mod;
@@ -2295,14 +2296,16 @@ testlist1[expr_contextType ctype]
       )*
     ;
 
-//yield_expr: 'yield' [testlist]
+//yield_expr: 'yield' ('from' test | [testlist])
 yield_expr
     returns [expr etype]
 @after {
     //needed for y2+=yield_expr
     $yield_expr.tree = $etype;
 }
-    : YIELD testlist[expr_contextType.Load]?
+    : YIELD FROM test[expr_contextType.Load]
+      { $etype = new YieldFrom($YIELD, actions.castExpr($test.tree)); }
+    | YIELD testlist[expr_contextType.Load]?
       {
           $etype = new Yield($YIELD, actions.castExpr($testlist.tree));
       }

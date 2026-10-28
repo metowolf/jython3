@@ -72,4 +72,5 @@ public interface NNodeVisitor {
     public boolean visit(NWhile m);
     public boolean visit(NWith m);
     public boolean visit(NYield m);
+    public boolean visit(NYieldFrom m);
 }

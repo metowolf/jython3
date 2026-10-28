@@ -1386,4 +1386,49 @@ public class IndexerTest extends TestBase {
         assertEquals(1, count[0]);
         assertEquals(java.util.Arrays.asList("result", "bound", "source"), names);
     }
+
+    public void testYieldFromReferencesAndResultType() throws Exception {
+        String source = index("yield_from.py", "values = [1, 2]", "def f():", "    result = yield from values", "    return result");
+        assertReference("yield_from.values", source.lastIndexOf("values"));
+        assertReference("yield_from.f&result", source.lastIndexOf("result"));
+        final int[] count = {0};
+        idx.getAstForFile("yield_from.py").visit(new org.python.indexer.ast.GenericNodeVisitor() {
+            @Override
+            public boolean dispatch(NNode node) {
+                if (node instanceof org.python.indexer.ast.NYieldFrom) {
+                    org.python.indexer.ast.NYieldFrom expression = (org.python.indexer.ast.NYieldFrom)node;
+                    assertSame(expression, expression.value.getParent());
+                    assertTrue(expression.getType() instanceof org.python.indexer.types.NUnknownType);
+                    count[0]++;
+                }
+                return true;
+            }
+        });
+        assertEquals(1, count[0]);
+    }
+
+    public void testYieldFromSerialization() throws Exception {
+        index("yield_serial.py", "def f():", "    yield from values");
+        NModule module = idx.getAstForFile("yield_serial.py");
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.ObjectOutputStream output = new java.io.ObjectOutputStream(bytes)) {
+            output.writeObject(module);
+        }
+        NModule copy;
+        try (java.io.ObjectInputStream input = new java.io.ObjectInputStream(
+                new java.io.ByteArrayInputStream(bytes.toByteArray()))) {
+            copy = (NModule)input.readObject();
+        }
+        final int[] count = {0};
+        copy.visit(new org.python.indexer.ast.DefaultNodeVisitor() {
+            @Override
+            public boolean visit(org.python.indexer.ast.NYieldFrom node) {
+                assertTrue(node.value instanceof NName);
+                assertEquals("values", ((NName)node.value).id);
+                count[0]++;
+                return true;
+            }
+        });
+        assertEquals(1, count[0]);
+    }
 }

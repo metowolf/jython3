@@ -27,6 +27,10 @@ public class PyBaseException extends PyObject implements Traverseproc {
     /** Exception's underlying dictionary, lazily created. */
     public PyObject __dict__;
 
+    // Exposed only on StopIteration by its own data descriptor. Kept separate
+    // from args and __dict__, as in CPython, including for Python subclasses.
+    PyObject stopIterationValue = Py.None;
+
     private PyObject cause = Py.None;
     private PyObject context = Py.None;
     private PyObject traceback = Py.None;
@@ -199,7 +203,9 @@ public class PyBaseException extends PyObject implements Traverseproc {
     }
 
     final PyObject BaseException___findattr__(String name) {
-        if (name.equals("__cause__") || name.equals("__context__")
+        if (name.equals("value") && Py.StopIteration != null
+                && getType().isSubType((PyType)Py.StopIteration)
+                || name.equals("__cause__") || name.equals("__context__")
                 || name.equals("__traceback__") || name.equals("__suppress_context__")) {
             return super.__findattr_ex__(name);
         }
@@ -371,7 +377,7 @@ public class PyBaseException extends PyObject implements Traverseproc {
                 return retValue;
             }
         }
-        for (PyObject link : new PyObject[] {cause, context, traceback}) {
+        for (PyObject link : new PyObject[] {cause, context, traceback, stopIterationValue}) {
             if (link != Py.None) {
                 retValue = visit.visit(link, arg);
                 if (retValue != 0) {
@@ -385,6 +391,6 @@ public class PyBaseException extends PyObject implements Traverseproc {
     @Override
     public boolean refersDirectlyTo(PyObject ob) {
         return ob != null && (ob == message || ob == args || ob == __dict__
-                || ob == cause || ob == context || ob == traceback);
+                || ob == cause || ob == context || ob == traceback || ob == stopIterationValue);
     }
 }

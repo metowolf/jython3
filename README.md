@@ -17,10 +17,15 @@ dictionary `**mapping` displays, generalized multiple `*args`/`**kwargs`
 function calls, iterable class bases such as `class C(*bases, Other, *more)`,
 expression decorators such as `@decorators[0]` or `@a if enabled else b`,
 matrix operators `@`/`@=` with forward, reflected and in-place special methods,
-and assignment expressions such as `if value := read():` or `(saved := value)`.
+assignment expressions such as `if value := read():` or `(saved := value)`,
+and native generator delegation using `yield from iterable` with generator
+`return value` and `StopIteration.value`. Delegation supports send/throw/close,
+Java iterables, paused-frame GC and `gi_yieldfrom`. Assignment expressions and
+yield-from are conservatively rejected inside comprehensions; PEP 479's
+conversion of escaped StopIteration to RuntimeError is not enabled.
 Assignment expressions preserve native local/global/nonlocal bindings and Java
-object identity. They are explicitly rejected inside comprehensions until modern
-comprehension scopes are implemented; this is not complete PEP 572 support.
+object identity. Modern comprehension scopes are not implemented; this is not
+complete PEP 572 support.
 Call expansion and matrix dispatch preserve Java interoperation. Matrix operators
 also have `operator.matmul`/`operator.imatmul` interfaces; no built-in matrix
 container, numerical algorithm or NumPy compatibility is supplied.

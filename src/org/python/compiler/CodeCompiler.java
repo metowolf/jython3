@@ -71,6 +71,8 @@ import org.python.antlr.ast.UnaryOp;
 import org.python.antlr.ast.While;
 import org.python.antlr.ast.With;
 import org.python.antlr.ast.Yield;
+import org.python.antlr.ast.YieldFrom;
+import org.python.core.YieldFromSupport;
 import org.python.antlr.ast.alias;
 import org.python.antlr.ast.cmpopType;
 import org.python.antlr.ast.comprehension;
@@ -752,6 +754,55 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     }
 
     @Override
+    public Object visitYieldFrom(YieldFrom node) throws Exception {
+        setline(node);
+        if (!fast_locals) {
+            throw new ParseException("'yield from' outside function", node);
+        }
+        // Evaluate the operand while the surrounding tracked stack is intact.
+        visit(node.getInternalValue());
+        code.invokestatic(p(YieldFromSupport.class), "start",
+                sig(YieldFromSupport.class, PyObject.class));
+        int delegate = code.getLocal(p(YieldFromSupport.class));
+        code.astore(delegate);
+        int stackState = saveStack();
+
+        Label advance = new Label();
+        Label finished = new Label();
+        code.aload(delegate);
+        loadFrame();
+        getNone();
+        code.label(advance);
+        code.invokevirtual(p(YieldFromSupport.class), "advance",
+                sig(PyObject.class, PyFrame.class, Object.class));
+        code.dup();
+        code.ifnull(finished);
+        setLastI(++yield_count);
+        saveLocals();
+        code.areturn();
+
+        Label restart = new Label();
+        yields.addElement(restart);
+        code.label(restart);
+        restoreLocals();
+        code.aload(delegate);
+        loadFrame();
+        loadFrame();
+        code.invokevirtual(p(PyFrame.class), "getGeneratorInput", sig(Object.class));
+        code.goto_(advance);
+
+        code.label(finished);
+        code.pop();
+        restoreStack(stackState);
+        code.aload(delegate);
+        code.invokevirtual(p(YieldFromSupport.class), "result", sig(PyObject.class));
+        code.aconst_null();
+        code.astore(delegate);
+        code.freeLocal(delegate);
+        return null;
+    }
+
+    @Override
     public Object visitYield(Yield node) throws Exception {
         setline(node);
         if (!fast_locals) {
@@ -953,11 +1004,8 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         }
         int tmp = 0;
         if (node.getInternalValue() != null) {
-            if (my_scope.generator && !(node instanceof LambdaSyntheticReturn)) {
-                throw new ParseException("'return' with argument " + "inside generator", node);
-            }
             visit(node.getInternalValue());
-            tmp = code.getReturnLocal();
+            tmp = my_scope.generator ? code.getLocal(p(PyObject.class)) : code.getReturnLocal();
             code.astore(tmp);
         }
         doFinallysDownTo(0);
@@ -966,6 +1014,7 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
 
         if (node.getInternalValue() != null) {
             code.aload(tmp);
+            if (my_scope.generator) code.freeLocal(tmp);
         } else {
             getNone();
         }

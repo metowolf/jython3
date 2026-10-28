@@ -122,6 +122,7 @@ ast_UnaryOp.derived:org.python.antlr.ast.UnaryOpDerived
 ast_While.derived:org.python.antlr.ast.WhileDerived
 ast_With.derived:org.python.antlr.ast.WithDerived
 ast_Yield.derived:org.python.antlr.ast.YieldDerived
+ast_YieldFrom.derived:org.python.antlr.ast.YieldFromDerived
 ast_alias.derived:org.python.antlr.ast.aliasDerived
 ast_arguments.derived:org.python.antlr.ast.argumentsDerived
 ast_comprehension.derived:org.python.antlr.ast.comprehensionDerived

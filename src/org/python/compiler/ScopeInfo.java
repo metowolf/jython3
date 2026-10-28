@@ -81,7 +81,6 @@ public class ScopeInfo extends Object implements ScopeConstants {
     public boolean from_import_star;
     public boolean contains_ns_free_vars;
     public boolean generator;
-    private boolean hasReturnWithValue;
     public int yield_count;
     public int max_with_count;
 
@@ -338,15 +337,9 @@ public class ScopeInfo extends Object implements ScopeConstants {
 
     public void defineAsGenerator(expr node) {
         generator = true;
-        if (hasReturnWithValue) {
-            throw new ParseException("'return' with argument " + "inside generator", node);
-        }
     }
 
     public void noteReturnValue(Return node) {
-        if (generator) {
-            throw new ParseException("'return' with argument " + "inside generator", node);
-        }
-        hasReturnWithValue = true;
+        // Python 3 generators may return a value, delivered by StopIteration.
     }
 }

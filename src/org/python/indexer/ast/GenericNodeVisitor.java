@@ -236,6 +236,10 @@ public abstract class GenericNodeVisitor extends DefaultNodeVisitor {
         return traverseIntoNodes && dispatch(n);
     }
 
+    public boolean visit(NYieldFrom n) {
+        return traverseIntoNodes && dispatch(n);
+    }
+
     public boolean visit(NYield n) {
         return traverseIntoNodes && dispatch(n);
     }
