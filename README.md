@@ -20,9 +20,12 @@ matrix operators `@`/`@=` with forward, reflected and in-place special methods,
 assignment expressions such as `if value := read():` or `(saved := value)`,
 and native generator delegation using `yield from iterable` with generator
 `return value` and `StopIteration.value`. Delegation supports send/throw/close,
-Java iterables, paused-frame GC and `gi_yieldfrom`. Assignment expressions and
-yield-from are conservatively rejected inside comprehensions; PEP 479's
-conversion of escaped StopIteration to RuntimeError is not enabled.
+Java iterables, paused-frame GC and `gi_yieldfrom`. PEP 479 now converts a
+StopIteration escaping an executing generator to RuntimeError with its original
+cause and context; normal returns and iterator completion are unchanged.
+`generator_stop` future imports and explicit compile flags are accepted for
+compatibility, not as an opt-in switch. Assignment expressions and yield-from
+are conservatively rejected inside comprehensions.
 Assignment expressions preserve native local/global/nonlocal bindings and Java
 object identity. Modern comprehension scopes are not implemented; this is not
 complete PEP 572 support.

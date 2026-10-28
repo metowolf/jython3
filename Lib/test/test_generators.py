@@ -43,7 +43,7 @@ Let's try a simple generator:
       File "<stdin>", line 1, in ?
     StopIteration
 
-"raise StopIteration" stops the generator too:
+An escaping "raise StopIteration" is a RuntimeError under PEP 479:
 
     >>> def f():
     ...     yield 1
@@ -56,7 +56,7 @@ Let's try a simple generator:
     >>> g.next()
     Traceback (most recent call last):
       File "<stdin>", line 1, in ?
-    StopIteration
+    RuntimeError: generator raised StopIteration
     >>> g.next()
     Traceback (most recent call last):
       File "<stdin>", line 1, in ?

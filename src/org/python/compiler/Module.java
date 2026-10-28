@@ -355,6 +355,9 @@ class PyCodeConstant extends Constant implements ClassConstants, Opcodes {
             if (cflags.isFlagSet(CodeFlag.CO_FUTURE_DIVISION)) {
                 _moreflags |= org.python.core.CodeFlag.CO_FUTURE_DIVISION.flag;
             }
+            if (cflags.isFlagSet(CodeFlag.CO_FUTURE_GENERATOR_STOP)) {
+                _moreflags |= CodeFlag.CO_FUTURE_GENERATOR_STOP.flag;
+            }
         }
         moreflags = _moreflags;
     }

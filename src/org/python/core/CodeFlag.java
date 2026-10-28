@@ -58,7 +58,11 @@ public enum CodeFlag {
     /**
      * unicode literals.
      */
-    CO_FUTURE_UNICODE_LITERALS(0x20000);
+    CO_FUTURE_UNICODE_LITERALS(0x20000),
+    /**
+     * Compatibility flag for the now-unconditional generator StopIteration rule.
+     */
+    CO_FUTURE_GENERATOR_STOP(0x800000);
 
 
     public final int flag;

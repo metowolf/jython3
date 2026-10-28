@@ -7,8 +7,8 @@ interoperability. That goal is **not complete**. This working tree implements
 native function-syntax, nonlocal-scope, exception-chaining, f-string,
 extended iterable-unpacking, mapping-display unpacking, generalized
 call-unpacking, iterable class-base, expression-decorator, matrix-operator,
-assignment-expression and generator-delegation stages on the existing Jython 2.7
-runtime. It is not Jython 3, is not a Python 3 compatibility mode, and does not
+assignment-expression, generator-delegation and PEP 479 generator-exception
+stages on the existing Jython 2.7 runtime. It is not Jython 3, is not a Python 3 compatibility mode, and does not
 make arbitrary Python 3 packages runnable.
 
 The project version remains 2.7.5b2-DEV. The bundled library is still based on
@@ -677,9 +677,9 @@ saved-frame references. Java tests isolate these edges from ordinary locals.
 retains the operand references and parent links, but conservatively assigns an
 unknown result type instead of claiming generator-return inference.
 
-**Boundaries:** PEP 479 is not enabled; explicit StopIteration escaping a native
-generator retains the legacy termination behavior. Yield-from anywhere inside a
-comprehension is conservatively rejected with a modern-comprehension-scopes
+**Boundaries:** This delegation stage initially retained legacy escaped
+StopIteration behavior; the subsequent PEP 479 stage below supersedes that
+boundary. Yield-from anywhere inside a comprehension is conservatively rejected with a modern-comprehension-scopes
 message, including first iterable clauses and nested lambdas that CPython may
 allow. This avoids silently inheriting Python 2 scope behavior. General iterator
 migration from next to __next__, coroutine/async-generator support, recursive
@@ -687,7 +687,8 @@ modern AST validation, and alternate legacy bytecode execution are not covered.
 The new delegation path understands __next__, legacy next and Java iterators;
 this does not modernize every iterator entry point in the runtime.
 
-The new Python suite has **51** cases: all pass natively; exact CPython 3.15.2
+At completion of the delegation stage, its Python suite had **51** cases:
+all passed natively; exact CPython 3.15.2
 passes **45** shared cases and skips **6** JVM-specific cases. The selected Java
 suite passes **152** cases, including seven new runtime/AST/GC cases and two new
 indexer cases. An independent fresh build compiled **922** production and **146**
@@ -702,13 +703,79 @@ Details and commands are in the
 Compiled-module API is now **49** for new yield-from helpers and generator
 return/paused-frame behavior. The project language version is still 2.7.5b2-DEV.
 
+## Implemented generator exception conversion
+
+PEP 479 is now unconditional in the native JVM generator path. A StopIteration
+or subclass escaping an executing generator becomes
+`RuntimeError("generator raised StopIteration")`. The original exception instance
+is preserved as both `__cause__` and `__context__`, with its traceback and value
+intact, and `__suppress_context__` is true. No exception reconstruction or
+stringification of the original instance is required. Java callers of
+`PyGenerator.__iternext__` receive the error rather than a false exhaustion signal.
+
+```python
+def broken():
+    yield 1
+    raise StopIteration(42)
+
+generator = broken()
+assert next(generator) == 1
+try:
+    next(generator)
+except RuntimeError as error:
+    assert error.__cause__.value == 42
+    assert error.__context__ is error.__cause__
+```
+
+Conversion happens only after body handlers and finally blocks unwind. A
+StopIteration caught inside the generator, normal `return value`, exhaustion of
+an iterator, and termination consumed by `yield from` are not errors. Throwing
+StopIteration into a suspended plain generator converts it if uncaught; throwing
+it into an unstarted or already closed generator does not execute its body and
+retains StopIteration, as observed on exact CPython 3.15.2. Close cleanup that
+raises StopIteration is an error, while a return from a caught GeneratorExit
+still delivers its value. Nested delegation does not repeatedly wrap errors.
+Generator-expression bodies use the same rule; this does not modernize their
+scope semantics or relax the existing comprehension syntax boundaries.
+
+`from __future__ import generator_stop` is accepted as a no-op, including the
+usual future-placement checks. The historical explicit compile flag `0x800000`
+is accepted, retained in code objects and inherited by dynamic compile unless
+`dont_inherit` is requested. Like CPython 3.15.2, the no-op import itself does not
+set that bit. PEP 479 cannot be disabled by omitting the flag.
+
+The bundled `contextlib` preserves the original StopIteration raised by a with
+body instead of leaking its PEP 479 wrapper; actual setup/cleanup errors still
+propagate. The nested generators in `difflib._mdiff` now use return or explicit
+exhaustion handling rather than relying on escaped StopIteration. These are
+focused changes to the retained 2.7 library, not a modern standard-library port.
+Legacy generator doctests and the prior yield-from suite now check the new
+behavior without removing the iterator-completion assertions.
+
+Validation: **45** native Python cases passed; exact CPython 3.15.2 passed **43**
+shared cases and skipped **2** JVM-only cases. The deduplicated selected Java
+suite passed **158** cases: **68** core cases (including six new tests) and
+**90** indexer cases. An independent fresh build compiled **922** production
+and **147** Java test sources and passed the same **158** Java and **45** Python
+cases. The complete Java driver reported **34,905** passing cases, no failures
+or timeouts, with **61** of **62** classes passing and one with no cases. The
+**61**-module native regression passed **60** modules and retained the existing
+`test_descr` import skip; overlapping runs are not summed. Details and commands
+are in [the PEP 479 validation report](Doc/native-generator-stop-validation.md).
+The project version remains **2.7.5b2-DEV** and compiled-module API remains
+**49**: this stage changes generator runtime semantics, not the generated call
+ABI. Rebuild the runtime and run copy-dev for the updated library; old cached
+native generator bodies also execute through the new exception boundary.
+No async/coroutine semantics, full tracing-event parity, complete modern AST
+validation, or alternate bytecode-interpreter migration is claimed.
+
 ## Build and test
 
 From the repository root, with a JDK and Apache Ant installed:
 
 ```sh
 ant jar copy-dev compile-test jar-test
-java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest org.python.core.DecoratorExpressionTest org.python.core.MatmulTest org.python.core.NamedExpressionTest org.python.core.YieldFromTest
+java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest org.python.core.DecoratorExpressionTest org.python.core.MatmulTest org.python.core.NamedExpressionTest org.python.core.YieldFromTest org.python.core.GeneratorStopTest
 ```
 
 The classpath separator above is for Linux/macOS; use `;` on Windows. In the
@@ -729,11 +796,12 @@ Java test classes must be on the classpath for `test_exceptions_jy` as well.
 Run the related Python regression set with:
 
 ```sh
-java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_yield_from test_python3_named_expressions test_python3_matmul test_operator test_tokenize test_augassign test_python3_decorator_expressions test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_generators_jy test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
+java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_generator_stop test_python3_yield_from test_python3_named_expressions test_python3_matmul test_operator test_tokenize test_augassign test_python3_decorator_expressions test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_generators_jy test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy test_genexps test_contextlib test_difflib test___future__ test_future test_iter test_itertools
 ```
 
-This selects 53 modules, adding yield-from and the Jython-specific generator
-suite to the previous 51-module assignment-expression and class/GC set.
+This selects 61 modules, retaining the preceding 53-module delegation set
+and adding the PEP 479 suite plus generator-expression, contextlib, difflib,
+future-metadata, future-statement, iterator and itertools coverage.
 The legacy `test_descr` module is currently skipped because it imports removed
 `test.test_support.verify`/`vereq` helpers; it is already listed in the existing
 Jython skip expectations. It must not be counted as a passing module. Run
@@ -827,7 +895,8 @@ added the generalized call accumulator and invocation helpers; stage 46
 invalidates caches for the new class-base parsing and decorator evaluation order;
 stage 47 adds the native matrix-dispatch entry points; stage 48 adds assignment
 expressions and corrects suspended operand-stack handling; stage 49 adds
-yield-from helpers and generator-return/paused-frame behavior.
+yield-from helpers and generator-return/paused-frame behavior. The subsequent
+PEP 479 runtime stage retains API 49; it adds no generated-call ABI dependency.
 This is a bytecode/cache compatibility number, not a Python language version.
 Rebuild compiled-only modules and regenerate source-backed `$py.class` caches.
 Do not bypass API checks to exchange caches with an older runtime.
@@ -839,7 +908,7 @@ the native path must meet it without forwarding execution to CPython. Full
 version-specific acceptance tests remain to be established. Outstanding work
 includes:
 
-- Yield-from inside comprehensions, PEP 479, class-header keywords and mapping expansion, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions inside comprehensions, and Python 3.12 PEP 701 f-string extensions.
+- Yield-from inside comprehensions, class-header keywords and mapping expansion, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions inside comprehensions, and Python 3.12 PEP 701 f-string extensions.
 - Pattern matching, exception groups, type parameters, deferred annotation semantics, and the other language/library changes through Python 3.15.2.
 - Removal or isolation of Python 2-only syntax such as tuple parameters, `print`/`exec` statements, backticks, and old exception forms.
 - Python 3 string/bytes, integer and division, iteration, import, class/metaclass, exception, and comprehension semantics.

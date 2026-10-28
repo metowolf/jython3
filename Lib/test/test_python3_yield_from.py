@@ -1,4 +1,4 @@
-"""Native yield-from protocol and generator return values (not PEP 479)."""
+"""Native yield-from protocol and generator return values, including PEP 479."""
 import ast
 import codeop
 import sys
@@ -717,9 +717,10 @@ class NativeYieldFromTests(unittest.TestCase):
             raise StopIteration(42)
         gen = delegate(legacy())
         self.assertEqual(next(gen), 1)
-        with self.assertRaises(StopIteration) as caught:
+        with self.assertRaises(RuntimeError) as caught:
             next(gen)
-        self.assertEqual(caught.exception.value, 42)
+        self.assertIsInstance(caught.exception.__cause__, StopIteration)
+        self.assertEqual(caught.exception.__cause__.value, 42)
 
     def test_invalid_ast_operands(self):
         for value in (None, ast.Name(id='x', ctx=ast.Store())):

@@ -213,9 +213,16 @@ public class PyGenerator extends PyIterator implements FinalizableBuiltin {
         } catch (PyException pye) {
             clearFrame();
             if (!pye.match(Py.StopIteration)) throw pye;
-            // Preserve legacy explicit StopIteration behavior; PEP 479 is separate.
-            stopException = pye;
-            return null;
+            // PEP 479 applies only to exceptions escaping an executing body.
+            // Normal returns below, and throw into an unstarted/closed generator,
+            // must keep their StopIteration protocol. Preserve the original
+            // instance and traceback as both cause and context of the wrapper.
+            PyException error = Py.RuntimeError("generator raised StopIteration");
+            error.normalize();
+            PyBaseException value = (PyBaseException)error.value;
+            value.setCause(pye.value);
+            value.setContext(pye.value);
+            throw error;
         } finally {
             gi_running = false;
         }

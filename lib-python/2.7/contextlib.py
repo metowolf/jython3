@@ -39,6 +39,16 @@ class GeneratorContextManager(object):
                 # was passed to throw().  This prevents a StopIteration
                 # raised inside the "with" statement from being suppressed
                 return exc is not value
+            except RuntimeError as exc:
+                if exc is value:
+                    exc.__traceback__ = traceback
+                    return False
+                # PEP 479 wraps an injected StopIteration when it escapes the
+                # generator. Restore the original body exception, not its wrapper.
+                if isinstance(value, StopIteration) and exc.__cause__ is value:
+                    value.__traceback__ = traceback
+                    return False
+                raise
             except:
                 # only re-raise if it's *not* the exception that was
                 # passed to throw(), because __exit__() must not raise

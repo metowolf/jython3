@@ -32,6 +32,10 @@ public enum FutureFeature implements Pragma {
      */
     unicode_literals(CodeFlag.CO_FUTURE_UNICODE_LITERALS),
     /**
+     * Retained no-op import: PEP 479 is unconditional in this runtime.
+     */
+    generator_stop,
+    /**
      * Use braces for block delimiters instead of indentation.
      */
     braces {
