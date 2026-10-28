@@ -572,14 +572,23 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
 
     @Override
     public Object visitClassDef(ClassDef node) throws Exception {
-        List<expr> decs = node.getInternalDecorator_list();
-        for (int i = decs.size() - 1; i >= 0; i--) {
-            visit(decs.get(i));
+        for (expr decorator : node.getInternalDecorator_list()) {
+            visit(decorator);
         }
         def(node.getInternalName());
-        int n = node.getInternalBases().size();
-        for (int i = 0; i < n; i++) {
-            visit(node.getInternalBases().get(i));
+        for (expr base : node.getInternalBases()) {
+            expr value = base;
+            if (base instanceof Starred) {
+                Starred star = (Starred)base;
+                if (star.getInternalCtx() != expr_contextType.Load) {
+                    code_compiler.error("class base star must have Load context", true, star);
+                }
+                value = star.getInternalValue();
+            }
+            if (value == null || expressionContext(value) != expr_contextType.Load) {
+                code_compiler.error("class base must have a value in Load context", true, node);
+            }
+            visit(value);
         }
         beginScope(node.getInternalName(), CLASSSCOPE, node, null);
         suite(node.getInternalBody());

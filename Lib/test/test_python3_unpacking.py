@@ -435,9 +435,15 @@ class NativeUnpackingTests(unittest.TestCase):
         with self.assertRaises(SyntaxError):
             compile(ast.fix_missing_locations(tree), '<multiple-star>', 'exec')
 
-    def test_unsupported_unpacking_is_not_silently_accepted(self):
+    def test_unpacking_boundaries(self):
+        class Base(object):
+            pass
+        namespace = {'bases': [Base]}
+        eval(compile('class C(*bases):\n pass', '<class-unpacking>', 'exec'), namespace)
+        self.assertEqual(namespace['C'].__bases__, (Base,))
+        self.assertIsInstance(namespace['C'](), Base)
         for source in ('[*x for x in []]', '(*x for x in [])', '{*x for x in []}',
-                       '{*x: 1}', 'class C(*bases):\n pass'):
+                       '{*x: 1}', 'class C(**mapping):\n pass'):
             with self.assertRaises(SyntaxError):
                 compile(source, '<unsupported-unpacking>', 'exec')
 

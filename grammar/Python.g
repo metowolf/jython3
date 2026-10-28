@@ -2121,7 +2121,8 @@ dict_item[List<expr> keys, List<expr> values]
       }
     ;
 
-//classdef: 'class' NAME ['(' [testlist] ')'] ':' suite
+// Class bases are separate expressions, not a tuple expression to flatten.
+// Class keywords/metaclass selection are a separate object-model migration.
 classdef
 @init {
     stmt stype = null;
@@ -2129,17 +2130,32 @@ classdef
 @after {
    $classdef.tree = stype;
 }
-    : decorators? CLASS NAME (LPAREN testlist[expr_contextType.Load]? RPAREN)? COLON suite[false]
+    : decorators? CLASS NAME (LPAREN class_bases? RPAREN)? COLON suite[false]
       {
           Token t = $CLASS;
           if ($decorators.start != null) {
               t = $decorators.start;
           }
           stype = new ClassDef(t, actions.cantBeNoneName($NAME),
-              actions.makeBases(actions.castExpr($testlist.tree)),
+              $class_bases.bases,
               actions.castStmts($suite.stypes),
               actions.castExprs($decorators.etypes));
       }
+    ;
+
+class_bases returns [List<expr> bases]
+    : b+=class_base (options {k=2;}: COMMA b+=class_base)* COMMA?
+      { $bases = actions.castExprs($b); }
+    ;
+
+// Unlike display stars, class/call star operands may be conditional tests.
+class_base
+@init { expr etype = null; }
+@after { $class_base.tree = etype; }
+    : STAR operand=test[expr_contextType.Load]
+      { etype = new Starred($class_base.start, actions.castExpr($operand.tree), expr_contextType.Load); }
+    | plain=test[expr_contextType.Load]
+      { etype = actions.castExpr($plain.tree); }
     ;
 
 // Calls use Starred in args and keyword(null, value) for mapping expansion.

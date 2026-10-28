@@ -5,8 +5,8 @@
 The native JVM migration target is **Python 3.15.2**, retaining Java
 interoperability. That goal is **not complete**. This working tree implements
 native function-syntax, nonlocal-scope, exception-chaining, f-string,
-extended iterable-unpacking, mapping-display unpacking, and generalized
-call-unpacking stages on the existing Jython 2.7 runtime.
+extended iterable-unpacking, mapping-display unpacking, generalized
+call-unpacking, and iterable class-base stages on the existing Jython 2.7 runtime.
 It is not Jython 3, is not a Python 3 compatibility mode, and does not make
 arbitrary Python 3 packages runnable.
 
@@ -229,9 +229,9 @@ level, missing operands, invalid star contexts and invalid nested star targets,
 including manually built ASTs and unreachable branches. This is not a full
 validation or migration of every legacy AST node.
 
-Starred class bases and unpacking comprehensions are not implemented.
-Dictionary `**` displays and generalized multiple `*args`/`**kwargs` calls are
-covered in the subsequent stages below.
+Unpacking comprehensions and class-header mapping/keyword arguments are not
+implemented. Dictionary `**` displays, generalized multiple `*args`/`**kwargs`
+calls and iterable class bases are covered in the subsequent stages below.
 The runtime's legacy iteration protocol is unchanged: Python iterator classes
 still need `next`, not only `__next__`. Length-hint allocation optimizations and
 their observable callbacks are not matched to CPython. Existing string/bytes behavior, container
@@ -279,8 +279,8 @@ This stage does not migrate the dictionary object model: insertion order is
 callback counts, hash reuse, large-literal allocation strategies and concurrent
 mutation behavior are not matched to CPython. Mapping key iterators retain the
 legacy iteration/length-hint boundaries stated above. Error wording is not an
-exact compatibility promise. Class-base unpacking and unpacking comprehensions
-remain outstanding; function-call unpacking is covered below.
+exact compatibility promise. Class-header mapping/keyword arguments and unpacking
+comprehensions remain outstanding; calls and iterable class bases are covered below.
 
 The mapping module adds 42 cases: 34 shared cases also pass on CPython 3.15.2,
 and 8 are JVM-specific. All 42 native cases and 24 selected Java cases (including
@@ -355,13 +355,75 @@ regression was fixed, with two added reference tests. See
 and the unresolved failure. These results do not establish full Python 3.15.2
 compatibility.
 
+## Implemented iterable class bases
+
+Class definitions accept any number of `*iterable` bases mixed with ordinary
+base expressions, including a trailing comma:
+
+```python
+class Left(object):
+    pass
+class Right(object):
+    pass
+class Combined(*[Left], *[], Right):
+    pass
+assert Combined.__bases__ == (Left, Right)
+```
+
+Each operand is evaluated once in the surrounding scope. Stars are consumed
+before the next base expression and before running the class body. The expanded
+sequence is passed to the existing native class factory: ordinary Python
+inheritance, inherited metaclasses, and Java classes/interfaces retain their
+runtime behavior. Sources are not mutated; duplicate bases and inconsistent
+MROs are rejected by the existing type machinery. A parenthesized tuple is now
+correctly one base expression, not implicitly flattened: `class C((A, B))`
+fails at runtime, while `class C(*(A, B))` expands both bases.
+
+Class decorator expressions now evaluate top-to-bottom before any bases or the
+body, for both starred and ordinary class definitions. They are applied
+bottom-to-top after class construction. Failures in iteration or decorator
+creation stop subsequent base/body evaluation; failed construction or decorator
+application does not replace an existing class-name binding. These ordering
+changes replace the legacy compiler's post-body decorator-expression evaluation.
+
+`ClassDef` retains its four fields and Java constructors; `bases` contains
+`Starred(value, Load)` entries. Scope analysis validates base contexts and
+operands even in unreachable ASTs, while the partial parser recognizes incomplete
+starred class headers. The indexer preserves base-operand references without
+claiming complete dynamic-base or MRO inference.
+
+The compiler reuses the native list-expansion helper and saves intermediate
+bases and decorators in typed locals across `yield`, including nested expression
+suspension, `throw()` and `close()`. Frame GC traversal now includes `PyObject[]`
+elements in saved locals, including partially evaluated decorator/base/argument
+arrays; it skips empty slots and preserves visitor early-return behavior.
+
+This stage is not the full Python 3 class-creation protocol. `metaclass=` and
+other class-header keywords, `**mapping` in class headers, `__prepare__`,
+`__mro_entries__`/`__orig_bases__`, `__classcell__`/zero-argument `super`, and
+modern class hooks remain migration work. Empty base expansion still creates
+the same legacy class kind as a class with no explicit bases, not an implicit
+Python 3 `object` subclass. Legacy iteration, length-hint callback, error-text
+and object-model limitations remain.
+
+All 44 new native Python cases passed. On CPython 3.15.2, 37 shared cases passed
+and 7 JVM-only cases were skipped. Standard and fresh builds passed all 37
+selected Java cases; the fresh build compiled 912 production and 142 Java test
+sources. The expanded native regression selected 45 modules: 44 passed and
+`test_descr` was skipped for its existing missing test-helper imports, with no
+failures. The complete Java driver reported 34,864 cases with one previously
+recorded indexer reference failure and no timeouts. See
+[class-base validation](Doc/native-class-bases-validation.md) for commands,
+fixes, skipped coverage and the unresolved failure. This is not complete native
+Python 3.15.2 compatibility.
+
 ## Build and test
 
 From the repository root, with a JDK and Apache Ant installed:
 
 ```sh
 ant jar copy-dev compile-test jar-test
-java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest
+java -Dpython.home=dist -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.junit.runner.JUnitCore org.python.core.PyFunctionSignatureTest org.python.core.PyExceptionChainingTest org.python.core.FStringTest org.python.core.UnpackingTest org.python.core.MappingUnpackingTest org.python.core.CallUnpackingTest org.python.core.ClassBasesTest
 ```
 
 The classpath separator above is for Linux/macOS; use `;` on Windows. In the
@@ -382,8 +444,15 @@ Java test classes must be on the classpath for `test_exceptions_jy` as well.
 Run the related Python regression set with:
 
 ```sh
-java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration
+java -Dpython.home=dist -Dpython.io.encoding=UTF-8 -cp 'build/testclasses:dist/jython-dev.jar:extlibs/*' org.python.util.jython -B -m test.regrtest test_python3_class_bases test_python3_call_unpacking test_python3_mapping_unpacking test_python3_unpacking test_python3_fstrings test_python3_function_syntax test_python3_nonlocal test_python3_exception_chaining test_func_jy test_scope test_call test_extcall test_decorators test_codeop test_grammar test_ast test_ast_jy test_funcattrs test_generators test_syntax test_exceptions test_exceptions_jy test_with test_traceback test_doctest test_sys_jy test_str test_unicode test_str_jy test_unicode_jy test_dict test_dict_jy test_dictviews test_dictcomps test_set test_java_integration test_class test_class_jy test_classdecorators test_descr test_descr_jy test_metaclass test_java_subclasses test_subclasses_jy test_gc_jy
 ```
+
+This selects 45 modules, including the expanded class and GC regression set.
+The legacy `test_descr` module is currently skipped because it imports removed
+`test.test_support.verify`/`vereq` helpers; it is already listed in the existing
+Jython skip expectations. It must not be counted as a passing module. Run
+`copy-dev` after editing library tests so this command sees the current sources
+in the assembled `dist/Lib`, which combines `lib-python/2.7` with `Lib` overrides.
 
 The earlier modules contain 25 function, 16 nonlocal, 33 exception-chaining, and
 40 f-string test cases. Shared cases were also run on CPython 3.11; three
@@ -434,8 +503,9 @@ The AST is transitional, not the CPython 3 AST:
 - `Nonlocal(names)` is a new statement node with visitor and Python subtype support.
 - `Raise` keeps `type`, `inst`, and `tback`, then adds `cause`; it is not the CPython 3 `Raise(exc, cause)` layout.
 - `JoinedStr(values)` and `FormattedValue(value, conversion, format_spec)` are new expression nodes with visitor, Python subtype and GC support. `conversion` is `-1` or the ordinal of `s`, `r`, or `a`; absent `format_spec` is Python `None`. Literal parts remain `Str`, not modern `Constant` nodes.
-- `Starred(value, ctx)` represents extended assignment, iterable display and call unpacking. It has visitor, Python subtype and GC support.
+- `Starred(value, ctx)` represents extended assignment, iterable display, call and class-base unpacking. It has visitor, Python subtype and GC support.
 - `Call.args` now contains stars and `Call.keywords` contains null-name mapping entries. Legacy `starargs`/`kwargs` fields and constructors remain available for pure legacy calls, but cannot be mixed with modern expansion entries.
+- `ClassDef.bases` now contains stars but keeps its original four-field layout; class keywords are not yet supported.
 - `Dict(keys, values)` now uses a null key slot for each mapping display expansion; ordinary `None` keys remain expression nodes. List lengths must match and values cannot be null.
 - Old four-field function and three-field raise constructors remain available. Code relying on exact `_fields` tuples must handle the additions.
 
@@ -461,14 +531,15 @@ Parameter slots are positional-only, positional-or-keyword, keyword-only,
 optional `*args`, then optional `**kwargs`. Old Java code factories remain
 available; a new overload carries the additional parameter counts.
 
-The compiled-module API version is now **45**: stage 40 introduced function
+The compiled-module API version is now **46**: stage 40 introduced function
 metadata and setters; stage 41 introduced closure deletion and exception-state
 helpers; stage 42 added f-string runtime helpers; stage 43 added iterable
 unpacking helpers; stage 44 added mapping-display merging helpers; stage 45
-adds the generalized call accumulator and invocation helpers.
-This is a bytecode compatibility number, not a Python language version. Rebuild
-compiled-only modules and regenerate source-backed `$py.class` caches. Do not
-bypass API checks to exchange caches with an older runtime.
+added the generalized call accumulator and invocation helpers; stage 46
+invalidates caches for the new class-base parsing and decorator evaluation order.
+This is a bytecode/cache compatibility number, not a Python language version.
+Rebuild compiled-only modules and regenerate source-backed `$py.class` caches.
+Do not bypass API checks to exchange caches with an older runtime.
 
 ## Remaining migration work and boundaries
 
@@ -477,7 +548,7 @@ the native path must meet it without forwarding execution to CPython. Full
 version-specific acceptance tests remain to be established. Outstanding work
 includes:
 
-- `yield from`, generalized class-base unpacking, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, matrix multiplication, and Python 3.12 PEP 701 f-string extensions.
+- `yield from`, class-header keywords and mapping expansion, unpacking comprehensions, `async`/`await`, asynchronous generators and comprehensions, variable annotations, assignment expressions, matrix multiplication, and Python 3.12 PEP 701 f-string extensions.
 - Pattern matching, exception groups, type parameters, deferred annotation semantics, and the other language/library changes through Python 3.15.2.
 - Removal or isolation of Python 2-only syntax such as tuple parameters, `print`/`exec` statements, backticks, and old exception forms.
 - Python 3 string/bytes, integer and division, iteration, import, class/metaclass, exception, and comprehension semantics.

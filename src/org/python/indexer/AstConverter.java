@@ -398,8 +398,14 @@ public class AstConverter extends Visitor {
 
     @Override
     public Object visitClassDef(ClassDef n) throws Exception {
+        // Preserve operand references; dynamic iterable base/MRO inference is
+        // outside the legacy indexer's class model.
+        List<NNode> bases = new ArrayList<NNode>();
+        for (expr base : n.getInternalBases()) {
+            bases.add(convExpr(base instanceof Starred ? ((Starred)base).getInternalValue() : base));
+        }
         return new NClassDef((NName)convExpr(n.getInternalNameNode()),
-                             convertListExpr(n.getInternalBases()),
+                             bases,
                              convertListStmt(n.getInternalBody()),
                              start(n), stop(n));
     }

@@ -858,9 +858,18 @@ dict_item
     | test COLON test
     ;
 
-//classdef: 'class' NAME ['(' [testlist] ')'] ':' suite
+// Match the full parser's iterable base expansion and incomplete-input forms.
 classdef
-    : decorators? CLASS NAME (LPAREN testlist? RPAREN)? COLON suite
+    : decorators? CLASS NAME (LPAREN class_bases? RPAREN)? COLON suite
+    ;
+
+class_bases
+    : class_base (options {k=2;}: COMMA class_base)* COMMA?
+    ;
+
+class_base
+    : STAR test
+    | test
     ;
 
 // Generalized call unpacking, matching the full parser's argument forms.

@@ -445,6 +445,17 @@ public class PyFrame extends PyObject implements Traverseproc {
                         if (retVal != 0) {
                             return retVal;
                         }
+                    } else if (ob instanceof PyObject[]) {
+                        // Compiler temporaries include partially evaluated bases,
+                        // decorators and arguments. Their elements are strong edges.
+                        for (PyObject value : (PyObject[]) ob) {
+                            if (value != null) {
+                                retVal = visit.visit(value, arg);
+                                if (retVal != 0) {
+                                    return retVal;
+                                }
+                            }
+                        }
                     } else if (ob instanceof Traverseproc) {
                         retVal = ((Traverseproc) ob).traverse(visit, arg);
                         if (retVal != 0) {
@@ -540,6 +551,12 @@ public class PyFrame extends PyObject implements Traverseproc {
             for (Object obj: f_savedlocals) {
                 if (obj == ob) {
                     return true;
+                } else if (obj instanceof PyObject[]) {
+                    for (PyObject value : (PyObject[]) obj) {
+                        if (value == ob) {
+                            return true;
+                        }
+                    }
                 } else if (obj != null && obj instanceof Traverseproc
                         &&((Traverseproc) obj).refersDirectlyTo(ob)) {
                     return true;

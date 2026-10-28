@@ -2663,7 +2663,19 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     public Object visitClassDef(ClassDef node) throws Exception {
         setline(node);
 
-        int baseArray = makeArray(node.getInternalBases());
+        // Decorator expressions precede bases/body; application is bottom-up.
+        // Keep them in a typed local so a yield in the bases can suspend safely.
+        int decorators = node.getInternalDecorator_list().isEmpty() ? -1
+                : makeArray(node.getInternalDecorator_list());
+        int baseArray;
+        if (hasStarred(node.getInternalBases())) {
+            unpackDisplay(node.getInternalBases(), PyList.class);
+            code.invokevirtual(p(PyList.class), "getArray", sig(PyObject[].class));
+            baseArray = code.getLocal(ci(PyObject[].class));
+            code.astore(baseArray);
+        } else {
+            baseArray = makeArray(node.getInternalBases());
+        }
 
         // Get class name
         String name = getName(node.getInternalName());
@@ -2693,7 +2705,9 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                             PyObject[].class));
         }
 
-        applyDecorators(node.getInternalDecorator_list());
+        if (decorators >= 0) {
+            applyDecorators(decorators, node.getInternalDecorator_list().size());
+        }
 
         // Assign this new class to the given name
         set(new Name(node, node.getInternalName(), expr_contextType.Store));

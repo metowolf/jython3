@@ -966,6 +966,21 @@ public class IndexerTest extends TestBase {
         }
     }
 
+    public void testClassBaseUnpackingReferences() throws Exception {
+        String src = index(
+            "class_bases.py",
+            "class A(object): pass",
+            "class B(object): pass",
+            "first = [A]",
+            "last = [B]",
+            "class C(*first, *last): pass");
+        assertClassBinding("class_bases.C");
+        assertReference("class_bases.first", src.lastIndexOf("first"));
+        assertReference("class_bases.last", src.lastIndexOf("last"));
+        assertReference("class_bases.A", src.lastIndexOf("A"));
+        assertReference("class_bases.B", src.lastIndexOf("B"));
+    }
+
     public void testInstanceAttrsWithStdLib() throws Exception {
         includeStandardLibrary();
         String src = index(
