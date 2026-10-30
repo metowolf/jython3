@@ -130,6 +130,14 @@ public class Time implements ClassDictInit
         altzone = timezone - tz.getDSTSavings() / 1000;
     }
 
+    public static double monotonic() {
+        return System.nanoTime() / 1000000000.0;
+    }
+
+    public static double perf_counter() {
+        return monotonic();
+    }
+
     public static double time() {
         return System.currentTimeMillis()/1000.0;
     }

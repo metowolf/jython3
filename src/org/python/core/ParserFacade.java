@@ -156,6 +156,7 @@ public class ParserFacade {
                                 CompileMode kind,
                                 String filename,
                                 CompilerFlags cflags) throws Throwable {
+        Native3.configure(filename, cflags);
         reader.mark(MARK_LIMIT); // We need the ability to move back on the
                                  // reader, for the benefit of fixParseError and
                                  // validPartialSentence
@@ -309,9 +310,10 @@ public class ParserFacade {
         input = new BufferedInputStream(input);
         boolean bom = adjustForBOM(input);
         String encoding = readEncoding(input);
+        Native3.configure(filename, cflags);
 
         if (encoding == null) {
-            if (bom) {
+            if (bom || cflags.isFlagSet(CodeFlag.CO_NATIVE3)) {
                 encoding = "utf-8";
             } else if (cflags != null && cflags.encoding != null) {
                 encoding = cflags.encoding;

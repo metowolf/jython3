@@ -16,6 +16,7 @@ module Python version "$Revision$"
 
 	      | Delete(expr* targets)
 	      | Assign(expr* targets, expr value)
+	      | AnnAssign(expr target, expr annotation, expr? value, int simple)
 	      | AugAssign(expr target, operator op, expr value)
 
 	      -- not sure if bool is allowed, can always use int

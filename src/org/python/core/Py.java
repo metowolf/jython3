@@ -2253,7 +2253,15 @@ public final class Py extends PrePy {
         ThreadState state = getThreadState();
         PyObject dict = code.call(state, Py.EmptyObjects, Py.NoKeywords,
                 state.frame.f_globals, Py.EmptyObjects, new PyTuple(closure_cells));
-        return makeClass(name, bases, dict);
+        if (code instanceof PyBaseCode && ((PyBaseCode)code).co_flags.isFlagSet(CodeFlag.CO_NATIVE3)
+                && bases.length == 0) {
+            bases = new PyObject[] {PyObject.TYPE};
+        }
+        PyObject cell = dict.__finditem__("__classcell__");
+        if (cell != null) dict.__delitem__("__classcell__");
+        PyObject result = makeClass(name, bases, dict);
+        if (cell instanceof PyCell) ((PyCell)cell).ob_ref = result;
+        return result;
     }
 
     public static PyObject makeClass(String name, PyObject base, PyObject dict) {

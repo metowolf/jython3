@@ -15,6 +15,7 @@ import org.python.antlr.PythonTree;
 import org.python.antlr.Visitor;
 import org.python.antlr.ast.Assert;
 import org.python.antlr.ast.Assign;
+import org.python.antlr.ast.AnnAssign;
 import org.python.antlr.ast.Attribute;
 import org.python.antlr.ast.AugAssign;
 import org.python.antlr.ast.BinOp;
@@ -272,6 +273,11 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         this.tbl = scope.tbl;
 
         // BEGIN preparse
+        if (scope.hasAnnotations) {
+            loadFrame();
+            code.invokestatic(p(org.python.core.Native3.class), "setupAnnotations",
+                    sig(Void.TYPE, PyFrame.class));
+        }
         if (classBody) {
             // Set the class's __module__ to __name__. fails when there's no __name__
             loadFrame();
@@ -327,6 +333,16 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         Object exit = visit(node);
 
         if (classBody) {
+            SymInfo classCell = tbl.get("__class__");
+            if (classCell != null && (classCell.flags & ScopeInfo.CELL) != 0) {
+                loadFrame();
+                code.ldc("__classcell__");
+                loadFrame();
+                code.iconst(classCell.env_index);
+                code.invokevirtual(p(PyFrame.class), "getclosure", sig(PyObject.class, Integer.TYPE));
+                code.invokevirtual(p(PyFrame.class), "setlocal",
+                        sig(Void.TYPE, String.class, PyObject.class));
+            }
             loadFrame();
             code.invokevirtual(p(PyFrame.class), "getf_locals", sig(PyObject.class));
             code.areturn();
@@ -650,6 +666,40 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         code.aconst_null();
         code.astore(value);
         code.freeLocal(value);
+        return null;
+    }
+
+    @Override
+    public Object visitAnnAssign(AnnAssign node) throws Exception {
+        setline(node);
+        expr target = node.getInternalTarget();
+        if (node.getInternalValue() != null) {
+            visit(node.getInternalValue());
+            set(target);
+        } else if (target instanceof Attribute) {
+            visit(((Attribute)target).getInternalValue());
+            code.pop();
+        } else if (target instanceof Subscript) {
+            visit(((Subscript)target).getInternalValue());
+            code.pop();
+            visit(((Subscript)target).getInternalSlice());
+            code.pop();
+        }
+        if (my_scope.kind != ScopeConstants.FUNCSCOPE) {
+            visit(node.getInternalAnnotation());
+            if (target instanceof Name && node.getInternalSimple() != 0) {
+                int annotation = code.getLocal(ci(PyObject.class));
+                code.astore(annotation);
+                loadFrame();
+                code.ldc(getName(((Name)target).getInternalId()));
+                code.aload(annotation);
+                code.freeLocal(annotation);
+                code.invokestatic(p(org.python.core.Native3.class), "setAnnotation",
+                        sig(Void.TYPE, PyFrame.class, String.class, PyObject.class));
+            } else {
+                code.pop();
+            }
+        }
         return null;
     }
 

@@ -59,6 +59,8 @@ public enum CodeFlag {
      * unicode literals.
      */
     CO_FUTURE_UNICODE_LITERALS(0x20000),
+    /** Native Python 3 dialect, selected by source root rather than package name. */
+    CO_NATIVE3(0x1000000),
     /**
      * Compatibility flag for the now-unconditional generator StopIteration rule.
      */

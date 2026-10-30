@@ -87,6 +87,7 @@ import org.python.antlr.ast.alias;
 import org.python.antlr.ast.arguments;
 import org.python.antlr.ast.Assert;
 import org.python.antlr.ast.Assign;
+import org.python.antlr.ast.AnnAssign;
 import org.python.antlr.ast.Attribute;
 import org.python.antlr.ast.AugAssign;
 import org.python.antlr.ast.BinOp;
@@ -648,7 +649,18 @@ expr_stmt
         $expr_stmt.tree = stype;
     }
 }
-    : ((testlist[null] augassign) => lhs=testlist[expr_contextType.AugStore]
+    : ((testlist[null] COLON) => lhs=testlist[expr_contextType.Store] COLON annotation=test[expr_contextType.Load]
+        (ASSIGN av=testlist[expr_contextType.Load])?
+        {
+            expr target = actions.castExpr($lhs.tree);
+            if (!(target instanceof Name) && !(target instanceof Attribute) && !(target instanceof Subscript)) {
+                errorHandler.error("illegal target for annotation", $lhs.tree, true);
+            }
+            stype = new AnnAssign($lhs.start, target, actions.castExpr($annotation.tree),
+                    $av.tree == null ? null : actions.castExpr($av.tree),
+                    target instanceof Name && $lhs.start.getType() == NAME ? 1 : 0);
+        }
+    | (testlist[null] augassign) => lhs=testlist[expr_contextType.AugStore]
         ( (aay=augassign y1=yield_expr
            {
                actions.checkAugAssign(actions.castExpr($lhs.tree));
@@ -1805,6 +1817,10 @@ atom
      | lb=BACKQUOTE testlist1[expr_contextType.Load] rb=BACKQUOTE
        {
            etype = new Repr($lb, actions.castExpr($testlist1.tree));
+       }
+     | DOT DOT DOT
+       {
+           etype = new Name($atom.start, "Ellipsis", $expr::ctype);
        }
      | name_or_print
        {

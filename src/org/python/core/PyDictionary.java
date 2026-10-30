@@ -56,7 +56,8 @@ public class PyDictionary extends AbstractDict implements ConcurrentMap, Travers
      */
     public PyDictionary(PyType type, int capacity) {
         super(type);
-        internalMap = new ConcurrentHashMap<PyObject,PyObject>(capacity, Generic.CHM_LOAD_FACTOR,
+        internalMap = Native3.frame(Py.getFrame()) ? new ConcurrentLinkedMap<PyObject, PyObject>()
+                : new ConcurrentHashMap<PyObject,PyObject>(capacity, Generic.CHM_LOAD_FACTOR,
                                                                Generic.CHM_CONCURRENCY_LEVEL);
     }
 
@@ -65,7 +66,8 @@ public class PyDictionary extends AbstractDict implements ConcurrentMap, Travers
      */
     public PyDictionary(PyType type) {
         super(type);
-        internalMap = Generic.concurrentMap();
+        internalMap = Native3.frame(Py.getFrame()) ? new ConcurrentLinkedMap<PyObject, PyObject>()
+                : Generic.<PyObject, PyObject>concurrentMap();
     }
 
     /**
@@ -102,7 +104,8 @@ public class PyDictionary extends AbstractDict implements ConcurrentMap, Travers
     protected PyDictionary(PyType type, boolean initializeBacking) {
         super(type);
         if (initializeBacking) {
-            internalMap = Generic.concurrentMap();
+            internalMap = Native3.frame(Py.getFrame()) ? new ConcurrentLinkedMap<PyObject, PyObject>()
+                    : Generic.<PyObject, PyObject>concurrentMap();
         } else {
             internalMap = null; /* for later initialization */
         }
@@ -730,6 +733,9 @@ public class PyDictionary extends AbstractDict implements ConcurrentMap, Travers
             throw Py.KeyError("popitem(): dictionary is empty");
         }
         Entry<PyObject, PyObject> entry = it.next();
+        if (internalMap instanceof ConcurrentLinkedMap) {
+            while (it.hasNext()) entry = it.next();
+        }
         PyTuple tuple = new PyTuple(entry.getKey(), entry.getValue());
         it.remove();
         return tuple;

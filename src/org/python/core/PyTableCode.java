@@ -152,8 +152,10 @@ public class PyTableCode extends PyBaseCode
 
         // Push frame
         frame.f_back = ts.frame;
-        if (frame.f_builtins == null) {
-            if (frame.f_back != null) {
+        if (Native3.frame(frame)) {
+            frame.f_builtins = Native3.builtins();
+        } else if (frame.f_builtins == null) {
+            if (frame.f_back != null && !Native3.frame(frame.f_back)) {
                 frame.f_builtins = frame.f_back.f_builtins;
             } else {
                 //System.err.println("ts: "+ts);

@@ -15,6 +15,17 @@ public class PyDictProxy extends PyObject implements Traverseproc {
     /** The dict proxied to. */
     PyObject dict;
 
+    @org.python.expose.ExposedNew
+    public static PyObject dictproxy_new(PyNewWrapper new_, boolean init, PyType subtype,
+            PyObject[] args, String[] keywords) {
+        ArgParser ap = new ArgParser("mappingproxy", args, keywords, new String[] {"mapping"}, 1);
+        PyObject mapping = ap.getPyObject(0);
+        if (mapping.__findattr__("keys") == null || mapping.__findattr__("__getitem__") == null) {
+            throw Py.TypeError("mappingproxy() argument must be a mapping");
+        }
+        return new PyDictProxy(mapping);
+    }
+
     public PyDictProxy(PyObject dict) {
         super();
         this.dict = dict;

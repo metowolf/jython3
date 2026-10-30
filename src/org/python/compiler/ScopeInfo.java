@@ -81,6 +81,7 @@ public class ScopeInfo extends Object implements ScopeConstants {
     public boolean from_import_star;
     public boolean contains_ns_free_vars;
     public boolean generator;
+    public boolean hasAnnotations;
     public int yield_count;
     public int max_with_count;
 
@@ -203,7 +204,9 @@ public class ScopeInfo extends Object implements ScopeConstants {
                 continue;
             }
             int flags = info.flags;
-            if (func) {
+            if (func || kind == CLASSSCOPE && name.equals("__class__")) {
+                // Only __class__ is captured from a class namespace. Other
+                // free variables pass through it from the enclosing function.
                 // not func global and bound ?
                 if ((flags & NGLOBAL) == 0 && (flags & BOUND) != 0) {
                     info.flags |= CELL;

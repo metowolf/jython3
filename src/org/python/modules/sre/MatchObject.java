@@ -73,10 +73,19 @@ public class MatchObject extends PyObject implements Traverseproc {
         if (pattern.groupindex == null)
             return result;
 
-        PyObject keys = pattern.groupindex.invoke("keys");
-
-        PyObject key;
-        for (int i = 0; (key = keys.__finditem__(i)) != null; i++) {
+        java.util.List<PyObject> keys = new java.util.ArrayList<PyObject>();
+        for (PyObject key : pattern.groupindex.invoke("keys").asIterable()) keys.add(key);
+        if (Native3.frame(Py.getFrame())) {
+            // The legacy regex compiler uses an unordered groupindex. The
+            // public Python 3 result is ordered by capture number.
+            java.util.Collections.sort(keys, new java.util.Comparator<PyObject>() {
+                public int compare(PyObject a, PyObject b) {
+                    return Integer.compare(pattern.groupindex.__getitem__(a).asInt(),
+                            pattern.groupindex.__getitem__(b).asInt());
+                }
+            });
+        }
+        for (PyObject key : keys) {
             PyObject item = getslice(key, def);
             result.__setitem__(key, item);
         }

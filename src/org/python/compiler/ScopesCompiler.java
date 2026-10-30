@@ -7,6 +7,7 @@ import org.python.antlr.PythonTree;
 import org.python.antlr.ast.ClassDef;
 import org.python.antlr.ast.Call;
 import org.python.antlr.ast.Assign;
+import org.python.antlr.ast.AnnAssign;
 import org.python.antlr.ast.AugAssign;
 import org.python.antlr.ast.BinOp;
 import org.python.antlr.ast.Delete;
@@ -68,10 +69,17 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
 
     private int level = 0;
     private int func_level = 0;
+    private final boolean native3;
 
     public ScopesCompiler(CompilationContext code_compiler, Hashtable<PythonTree,ScopeInfo> nodeScopes) {
+        this(code_compiler, nodeScopes, org.python.core.Native3.source(code_compiler.getFilename()));
+    }
+
+    public ScopesCompiler(CompilationContext code_compiler, Hashtable<PythonTree,ScopeInfo> nodeScopes,
+            boolean native3) {
         this.code_compiler = code_compiler;
         this.nodeScopes = nodeScopes;
+        this.native3 = native3;
         scopes = new Stack<ScopeInfo>();
     }
 
@@ -101,7 +109,7 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         int dist = 1;
         ScopeInfo referenceable = up;
         for (int i = scopes.size() - 1; i >= 0
-                && referenceable.kind == CLASSSCOPE; i--, dist++) {
+                && referenceable.kind == CLASSSCOPE && !native3; i--, dist++) {
             referenceable = (scopes.get(i));
         }
         cur.cook(referenceable, dist, code_compiler);
@@ -417,6 +425,28 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     }
 
     @Override
+    public Object visitAnnAssign(AnnAssign node) throws Exception {
+        expr target = node.getInternalTarget();
+        if (!(target instanceof Name) && !(target instanceof Attribute) && !(target instanceof Subscript)) {
+            code_compiler.error("illegal target for annotation", true, node);
+        }
+        if (node.getInternalSimple() != 0 && !(target instanceof Name)) {
+            code_compiler.error("simple annotation requires a name", true, node);
+        }
+        if (node.getInternalAnnotation() == null) {
+            code_compiler.error("annotation is required", true, node);
+        }
+        visit(target);
+        if (node.getInternalValue() != null) visit(node.getInternalValue());
+        // Local variable annotations are neither stored nor evaluated.
+        if (cur.kind != FUNCSCOPE) {
+            cur.hasAnnotations = true;
+            visit(node.getInternalAnnotation());
+        }
+        return null;
+    }
+
+    @Override
     public Object visitAssign(Assign node) throws Exception {
         for (expr target : node.getInternalTargets()) {
             checkDictTarget(target);
@@ -631,6 +661,9 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
             visit(value);
         }
         beginScope(node.getInternalName(), CLASSSCOPE, node, null);
+        if (native3) {
+            cur.addBound("__class__");
+        }
         suite(node.getInternalBody());
         endScope();
         return null;
@@ -672,6 +705,9 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
             cur.addBound(name);
         } else {
             cur.addUsed(name);
+            if (name.equals("super") && cur.kind == FUNCSCOPE && native3) {
+                cur.addUsed("__class__");
+            }
         }
         return null;
     }

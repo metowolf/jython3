@@ -33,7 +33,7 @@ public class imp {
 
     private static final String UNKNOWN_SOURCEFILE = "<unknown>";
 
-    private static final int APIVersion = 49;
+    private static final int APIVersion = 50;
 
     public static final int NO_MTIME = -1;
 
@@ -322,6 +322,11 @@ public class imp {
             }
         }
 
+        // Never reuse bytecode produced under a different source dialect.
+        if (testing && code instanceof PyBaseCode
+                && ((PyBaseCode)code).co_flags.isFlagSet(CodeFlag.CO_NATIVE3) != Native3.source(sourceName)) {
+            return null;
+        }
         // Execute the PyCode object (run the module body) to populate the module __dict__
         logger.log(Level.CONFIG, "import {0} # precompiled from {1}",
                 new Object[] {name, compiledName});
@@ -559,14 +564,15 @@ public class imp {
                 filename = UNKNOWN_SOURCEFILE;
             }
             org.python.antlr.base.mod node;
+            CompilerFlags flags = new CompilerFlags();
             try {
-                // Compile source to AST
-                node = ParserFacade.parse(source, CompileMode.exec, filename, new CompilerFlags());
+                // Keep the dialect selected by the parser through bytecode generation.
+                node = ParserFacade.parse(source, CompileMode.exec, filename, flags);
             } finally {
                 source.close();
             }
             // Generate code
-            Module.compile(node, ofp, name + "$py", filename, true, false, null, mtime);
+            Module.compile(node, ofp, name + "$py", filename, true, false, flags, mtime);
             return ofp.toByteArray();
         } catch (Throwable t) {
             throw ParserFacade.fixParseError(null, t, filename);

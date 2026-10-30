@@ -34,6 +34,17 @@ public class PySuper extends PyObject implements Traverseproc {
     @ExposedMethod
     @ExposedNew
     public void super___init__(PyObject[] args, String[] keywords) {
+        if (args.length == 0 && keywords.length == 0) {
+            PyFrame frame = Py.getFrame();
+            if (frame == null || frame.f_code.co_argcount == 0) {
+                throw Py.RuntimeError("super(): no arguments");
+            }
+            PyObject type = frame.getLocals().__finditem__("__class__");
+            if (type == null) throw Py.RuntimeError("super(): __class__ cell not found");
+            PyObject first = frame.getLocals().__finditem__(frame.f_code.co_varnames[0]);
+            if (first == null) throw Py.RuntimeError("super(): arg[0] deleted");
+            args = new PyObject[] {type, first};
+        }
         if (keywords.length != 0 || !PyBuiltinCallable.DefaultInfo.check(args.length, 1, 2)) {
             throw PyBuiltinCallable.DefaultInfo.unexpectedCall(args.length, keywords.length != 0,
                                                                "super", 1, 2);

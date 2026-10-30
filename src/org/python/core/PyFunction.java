@@ -440,6 +440,10 @@ public class PyFunction extends PyObject implements InvocationHandler, Traversep
 
     @ExposedMethod(defaults = "null", doc = BuiltinDocs.function___get___doc)
     final PyObject function___get__(PyObject obj, PyObject type) {
+        if ((obj == null || obj == Py.None) && __code__ instanceof PyBaseCode
+                && ((PyBaseCode)__code__).co_flags.isFlagSet(CodeFlag.CO_NATIVE3)) {
+            return this;
+        }
         return new PyMethod(this, obj, type);
     }
 

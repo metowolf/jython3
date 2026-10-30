@@ -10,6 +10,7 @@ public interface VisitorIF<R> {
     public R visitClassDef(ClassDef node) throws Exception;
     public R visitReturn(Return node) throws Exception;
     public R visitDelete(Delete node) throws Exception;
+    public R visitAnnAssign(AnnAssign node) throws Exception;
     public R visitAssign(Assign node) throws Exception;
     public R visitAugAssign(AugAssign node) throws Exception;
     public R visitPrint(Print node) throws Exception;

@@ -27,6 +27,7 @@ public class AstModule implements ClassDictInit {
         dict.__setitem__("Module", Module.TYPE);
         dict.__setitem__("Assert", Assert.TYPE);
         dict.__setitem__("Assign", Assign.TYPE);
+        dict.__setitem__("AnnAssign", AnnAssign.TYPE);
         dict.__setitem__("Attribute", Attribute.TYPE);
         dict.__setitem__("AugAssign", AugAssign.TYPE);
         dict.__setitem__("BinOp", BinOp.TYPE);
