@@ -527,7 +527,8 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         // These values belong to the function and must survive decorator application.
         int defaults = makeArray(scope.ac.getDefaults());
         int kwDefaults = makeFunctionDictionary(scope.ac.kwDefaults, null);
-        int annotations = makeFunctionDictionary(scope.ac.annotations, node.getInternalReturns());
+        int annotations = makeFunctionDictionary(scope.ac.annotations, node.getInternalReturns(),
+                cflags.isFlagSet(org.python.core.CodeFlag.CO_FUTURE_ANNOTATIONS));
 
         code.new_(p(PyFunction.class));
         code.dup();
@@ -572,6 +573,11 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
     /** Evaluate in the defining scope, with an empty operand stack at each expression. */
     private int makeFunctionDictionary(java.util.List<keyword> entries, expr returns)
             throws Exception {
+        return makeFunctionDictionary(entries, returns, false);
+    }
+
+    private int makeFunctionDictionary(java.util.List<keyword> entries, expr returns,
+            boolean postponed) throws Exception {
         if (entries.isEmpty() && returns == null) {
             return -1;
         }
@@ -579,11 +585,11 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
         for (keyword entry : entries) {
             // Parameter slots currently retain their source names, including private names.
             elements.add(new Str(entry, Py.newString(entry.getInternalArg())));
-            elements.add(entry.getInternalValue());
+            elements.add(postponed ? AnnotationText.literal(entry.getInternalValue()) : entry.getInternalValue());
         }
         if (returns != null) {
             elements.add(new Str(returns, Py.newString("return")));
-            elements.add(returns);
+            elements.add(postponed ? AnnotationText.literal(returns) : returns);
         }
         int array = makeArray(elements);
         code.new_(p(PyDictionary.class));
@@ -686,7 +692,12 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
             code.pop();
         }
         if (my_scope.kind != ScopeConstants.FUNCSCOPE) {
-            visit(node.getInternalAnnotation());
+            boolean postponed = cflags.isFlagSet(org.python.core.CodeFlag.CO_FUTURE_ANNOTATIONS);
+            if (postponed && (!(target instanceof Name) || node.getInternalSimple() == 0)) {
+                return null;
+            }
+            visit(postponed ? AnnotationText.literal(node.getInternalAnnotation())
+                    : node.getInternalAnnotation());
             if (target instanceof Name && node.getInternalSimple() != 0) {
                 int annotation = code.getLocal(ci(PyObject.class));
                 code.astore(annotation);
@@ -1329,6 +1340,73 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
             return suite(node.getInternalOrelse()) != null ? exit : null;
         } else {
             return null;
+        }
+    }
+
+    @Override
+    public Object visitMatch(org.python.antlr.ast.Match node) throws Exception {
+        setline(node);
+        visit(node.getInternalSubject());
+        int subject = storeTop();
+        Label end = new Label();
+        for (org.python.antlr.ast.match_case item : node.getInternalCases()) {
+            Label next = new Label();
+            matchPattern(item.getInternalPattern(), subject, next);
+            if (item.getInternalGuard() != null) {
+                visit(item.getInternalGuard());
+                code.invokevirtual(p(PyObject.class), "__nonzero__", sig(Boolean.TYPE));
+                code.ifeq(next);
+            }
+            if (suite(item.getInternalBody()) == null) code.goto_(end);
+            code.label(next);
+        }
+        code.label(end);
+        code.aconst_null();
+        code.astore(subject);
+        code.freeLocal(subject);
+        return null;
+    }
+
+    private void matchPattern(org.python.antlr.base.pattern pattern, int subject, Label failure)
+            throws Exception {
+        if (pattern instanceof org.python.antlr.ast.MatchValue) {
+            // Evaluate value expressions with an empty stack (they may suspend).
+            visit(((org.python.antlr.ast.MatchValue)pattern).getInternalValue());
+            int value = storeTop();
+            code.aload(subject);
+            code.aload(value);
+            code.freeLocal(value);
+            code.invokevirtual(p(PyObject.class), "_eq", sig(PyObject.class, PyObject.class));
+            code.invokevirtual(p(PyObject.class), "__nonzero__", sig(Boolean.TYPE));
+            code.ifeq(failure);
+        } else if (pattern instanceof org.python.antlr.ast.MatchSingleton) {
+            code.aload(subject);
+            Object value = ((org.python.antlr.ast.MatchSingleton)pattern).getInternalValue();
+            String field = value == Py.None ? "None" : value == Py.True ? "True" : "False";
+            code.getstatic(p(Py.class), field,
+                    ci(value == Py.None ? PyObject.class : org.python.core.PyBoolean.class));
+            code.if_acmpne(failure);
+        } else if (pattern instanceof org.python.antlr.ast.MatchAs) {
+            org.python.antlr.ast.MatchAs capture = (org.python.antlr.ast.MatchAs)pattern;
+            if (capture.getInternalPattern() != null) matchPattern(capture.getInternalPattern(), subject, failure);
+            if (capture.getInternalName() != null) {
+                int previous = temporary;
+                set(new Name(capture, capture.getInternalName(), expr_contextType.Store), subject);
+                temporary = previous;
+            }
+        } else if (pattern instanceof org.python.antlr.ast.MatchOr) {
+            java.util.List<org.python.antlr.base.pattern> choices =
+                    ((org.python.antlr.ast.MatchOr)pattern).getInternalPatterns();
+            Label matched = new Label();
+            for (int i = 0; i < choices.size(); i++) {
+                Label next = i + 1 == choices.size() ? failure : new Label();
+                matchPattern(choices.get(i), subject, next);
+                code.goto_(matched);
+                if (next != failure) code.label(next);
+            }
+            code.label(matched);
+        } else {
+            throw new ParseException("unsupported match pattern", pattern);
         }
     }
 
@@ -2090,9 +2168,20 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                     starred ? (soleStar ? "defer" : "extend") : "add",
                     sig(Void.TYPE, PyObject.class));
         }
+        addCallKeywords(builder, node.getInternalKeywords());
+        code.aload(builder);
+        loadThreadState();
+        code.invokevirtual(p(CallUnpackingSupport.class), "call", sig(PyObject.class, ThreadState.class));
+        code.aconst_null();
+        code.astore(builder);
+        code.freeLocal(builder);
+        return null;
+    }
+
+    private void addCallKeywords(int builder, java.util.List<keyword> keywords) throws Exception {
         int i = 0;
-        while (i < node.getInternalKeywords().size()) {
-            keyword key = node.getInternalKeywords().get(i);
+        while (i < keywords.size()) {
+            keyword key = keywords.get(i);
             if (key.getInternalArg() == null) {
                 visit(key.getInternalValue());
                 code.aload(builder);
@@ -2103,11 +2192,11 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                 java.util.List<expr> values = new ArrayList<expr>();
                 java.util.List<String> names = new ArrayList<String>();
                 do {
-                    key = node.getInternalKeywords().get(i++);
+                    key = keywords.get(i++);
                     names.add(key.getInternalArg());
                     values.add(key.getInternalValue());
-                } while (i < node.getInternalKeywords().size()
-                        && node.getInternalKeywords().get(i).getInternalArg() != null);
+                } while (i < keywords.size()
+                        && keywords.get(i).getInternalArg() != null);
                 int array = makeArray(values);
                 int strings = makeStrings(code, names);
                 code.aload(builder);
@@ -2119,13 +2208,7 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                 freeArrayRef(strings);
             }
         }
-        code.aload(builder);
-        loadThreadState();
-        code.invokevirtual(p(CallUnpackingSupport.class), "call", sig(PyObject.class, ThreadState.class));
-        code.aconst_null();
-        code.astore(builder);
-        code.freeLocal(builder);
-        return null;
+
     }
 
     @Override
@@ -2837,6 +2920,23 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
             baseArray = makeArray(node.getInternalBases());
         }
 
+        int classKeywords = -1;
+        if (!node.getInternalKeywords().isEmpty()) {
+            code.new_(p(CallUnpackingSupport.class));
+            code.dup();
+            getNone();
+            code.invokespecial(p(CallUnpackingSupport.class), "<init>", sig(Void.TYPE, PyObject.class));
+            int builder = code.getLocal(p(CallUnpackingSupport.class));
+            code.astore(builder);
+            addCallKeywords(builder, node.getInternalKeywords());
+            code.aload(builder);
+            code.invokevirtual(p(CallUnpackingSupport.class), "keywordDictionary", sig(PyObject.class));
+            classKeywords = storeTop();
+            code.aconst_null();
+            code.astore(builder);
+            code.freeLocal(builder);
+        }
+
         // Get class name
         String name = getName(node.getInternalName());
         code.ldc(name);
@@ -2853,16 +2953,17 @@ public class CodeCompiler extends Visitor implements Opcodes, ClassConstants {
                 getDocStr(node.getInternalBody()), true, false, node.getLineno(), scope, cflags)
                 .get(code);
 
-        // Make class out of name, bases, and code
-        if (!makeClosure(scope)) {
-            code.invokestatic(p(Py.class), "makeClass",
-                    sig(PyObject.class, String.class, PyObject[].class, PyCode.class));
-        } else {
-            code.invokestatic(
-                    p(Py.class),
-                    "makeClass",
-                    sig(PyObject.class, String.class, PyObject[].class, PyCode.class,
-                            PyObject[].class));
+        // Pass class keywords explicitly, rather than injecting __metaclass__.
+        if (!makeClosure(scope)) code.aconst_null();
+        if (classKeywords < 0) code.aconst_null();
+        else code.aload(classKeywords);
+        code.invokestatic(p(Py.class), "makeClass",
+                sig(PyObject.class, String.class, PyObject[].class, PyCode.class,
+                        PyObject[].class, PyObject.class));
+        if (classKeywords >= 0) {
+            code.aconst_null();
+            code.astore(classKeywords);
+            code.freeLocal(classKeywords);
         }
 
         if (decorators >= 0) {

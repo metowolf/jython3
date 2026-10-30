@@ -71,6 +71,7 @@ public class exceptions extends PyObject implements ClassDictInit {
         buildClass(dict, "OSError", "EnvironmentError", "OS system call failed.");
 
         buildClass(dict, "RuntimeError", "StandardError", "Unspecified run-time error.");
+        buildClass(dict, "RecursionError", "RuntimeError", "Maximum recursion depth exceeded.");
 
         buildClass(dict, "NotImplementedError", "RuntimeError",
                    "Method or function hasn't been implemented yet.");

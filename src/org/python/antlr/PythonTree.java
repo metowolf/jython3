@@ -17,6 +17,8 @@ import java.util.List;
 public class PythonTree extends AST implements Traverseproc {
 
     public boolean from_future_checked = false;
+    /** Parser-preserved expression text, used only for postponed annotations. */
+    public String annotationSource;
     private int charStartIndex = -1;
     private int charStopIndex = -1;
     private CommonTree node;

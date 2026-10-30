@@ -75,7 +75,8 @@ class ThreadStateMapping {
             scoped[0] = ts;
             scoped[1] = ts.getSystemState();
         } else if (ts.call_depth > ts.getSystemState().getrecursionlimit()) {
-            throw Py.RuntimeError("maximum recursion depth exceeded");
+            throw new PyException(Native3.frame(ts.frame) ? Py.RecursionError : Py.RuntimeError,
+                    "maximum recursion depth exceeded");
         }
         ts.call_depth++;
     }

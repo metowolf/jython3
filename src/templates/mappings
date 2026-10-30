@@ -167,3 +167,10 @@ _io._RawIOBase.derived:org.python.modules._io.PyRawIOBaseDerived
 _io.FileIO.derived:org.python.modules._io.PyFileIODerived
 _json.Encoder.derived:org.python.modules._json.EncoderDerived
 _json.Scanner.derived:org.python.modules._json.ScannerDerived
+
+ast_Match.derived:org.python.antlr.ast.MatchDerived
+ast_match_case.derived:org.python.antlr.ast.match_caseDerived
+ast_MatchValue.derived:org.python.antlr.ast.MatchValueDerived
+ast_MatchSingleton.derived:org.python.antlr.ast.MatchSingletonDerived
+ast_MatchAs.derived:org.python.antlr.ast.MatchAsDerived
+ast_MatchOr.derived:org.python.antlr.ast.MatchOrDerived

@@ -90,6 +90,17 @@ public final class CallUnpackingSupport implements Traverseproc {
         }
     }
 
+    public PyObject keywordDictionary() {
+        PyDictionary result = new PyDictionary();
+        for (Map.Entry<PyObject, PyObject> entry : keywords.entrySet()) {
+            if (!(entry.getKey() instanceof PyString)) {
+                throw Py.TypeError("keywords must be strings");
+            }
+            result.__setitem__(entry.getKey(), entry.getValue());
+        }
+        return result;
+    }
+
     public PyObject call(ThreadState state) {
         if (deferredStar != null) {
             extend(deferredStar);

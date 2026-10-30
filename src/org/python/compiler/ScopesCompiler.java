@@ -70,6 +70,11 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
     private int level = 0;
     private int func_level = 0;
     private final boolean native3;
+    private boolean postponedAnnotations;
+
+    public void setPostponedAnnotations(boolean value) {
+        postponedAnnotations = value;
+    }
 
     public ScopesCompiler(CompilationContext code_compiler, Hashtable<PythonTree,ScopeInfo> nodeScopes) {
         this(code_compiler, nodeScopes, org.python.core.Native3.source(code_compiler.getFilename()));
@@ -81,6 +86,31 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         this.nodeScopes = nodeScopes;
         this.native3 = native3;
         scopes = new Stack<ScopeInfo>();
+    }
+
+    @Override
+    public Object visitMatch(org.python.antlr.ast.Match node) throws Exception {
+        visit(node.getInternalSubject());
+        List<org.python.antlr.ast.match_case> cases = node.getInternalCases();
+        if (cases.isEmpty()) code_compiler.error("match requires a case", true, node);
+        for (int i = 0; i < cases.size(); i++) {
+            org.python.antlr.ast.match_case item = cases.get(i);
+            boolean irrefutable = org.python.antlr.PatternSupport.validate(item.getInternalPattern());
+            if (irrefutable && item.getInternalGuard() == null && i + 1 < cases.size()) {
+                code_compiler.error("irrefutable pattern makes remaining patterns unreachable", true, item);
+            }
+            visit(item.getInternalPattern());
+            if (item.getInternalGuard() != null) visit(item.getInternalGuard());
+            suite(item.getInternalBody());
+        }
+        return null;
+    }
+
+    @Override
+    public Object visitMatchAs(org.python.antlr.ast.MatchAs node) throws Exception {
+        if (node.getInternalPattern() != null) visit(node.getInternalPattern());
+        if (node.getInternalName() != null) def(node.getInternalName());
+        return null;
     }
 
     public void beginScope(String name, int kind, PythonTree node,
@@ -180,11 +210,13 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         for (keyword value : ac.kwDefaults) {
             visit(value.getInternalValue());
         }
-        for (keyword annotation : ac.annotations) {
-            visit(annotation.getInternalValue());
-        }
-        if (node.getInternalReturns() != null) {
-            visit(node.getInternalReturns());
+        if (!postponedAnnotations) {
+            for (keyword annotation : ac.annotations) {
+                visit(annotation.getInternalValue());
+            }
+            if (node.getInternalReturns() != null) {
+                visit(node.getInternalReturns());
+            }
         }
 
         beginScope(node.getInternalName(), FUNCSCOPE, node, ac);
@@ -441,7 +473,7 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
         // Local variable annotations are neither stored nor evaluated.
         if (cur.kind != FUNCSCOPE) {
             cur.hasAnnotations = true;
-            visit(node.getInternalAnnotation());
+            if (!postponedAnnotations) visit(node.getInternalAnnotation());
         }
         return null;
     }
@@ -659,6 +691,16 @@ public class ScopesCompiler extends Visitor implements ScopeConstants {
                 code_compiler.error("class base must have a value in Load context", true, node);
             }
             visit(value);
+        }
+        java.util.Set<String> names = new java.util.HashSet<String>();
+        for (keyword key : node.getInternalKeywords()) {
+            if (key.getInternalArg() != null && !names.add(key.getInternalArg())) {
+                code_compiler.error("keyword argument repeated", true, key);
+            }
+            if (key.getInternalValue() == null) {
+                code_compiler.error("class keyword requires a value", true, key);
+            }
+            visit(key.getInternalValue());
         }
         beginScope(node.getInternalName(), CLASSSCOPE, node, null);
         if (native3) {

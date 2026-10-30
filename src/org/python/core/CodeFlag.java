@@ -61,6 +61,8 @@ public enum CodeFlag {
     CO_FUTURE_UNICODE_LITERALS(0x20000),
     /** Native Python 3 dialect, selected by source root rather than package name. */
     CO_NATIVE3(0x1000000),
+    /** PEP 563: store annotations as strings without evaluating them. */
+    CO_FUTURE_ANNOTATIONS(0x10000000),
     /**
      * Compatibility flag for the now-unconditional generator StopIteration rule.
      */

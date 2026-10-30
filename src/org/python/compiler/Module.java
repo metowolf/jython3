@@ -352,6 +352,9 @@ class PyCodeConstant extends Constant implements ClassConstants, Opcodes {
             if (cflags.isFlagSet(CodeFlag.CO_NATIVE3)) {
                 _moreflags |= CodeFlag.CO_NATIVE3.flag;
             }
+            if (cflags.isFlagSet(CodeFlag.CO_FUTURE_ANNOTATIONS)) {
+                _moreflags |= CodeFlag.CO_FUTURE_ANNOTATIONS.flag;
+            }
             if (cflags.isFlagSet(CodeFlag.CO_GENERATOR_ALLOWED)) {
                 _moreflags |= org.python.core.CodeFlag.CO_GENERATOR_ALLOWED.flag;
             }
@@ -735,7 +738,10 @@ public class Module implements Opcodes, ClassConstants, CompilationContext {
         }
         org.python.core.Native3.configure(module.getFilename(), cflags);
         module.futures.preprocessFutures(node, cflags);
-        new ScopesCompiler(module, module.scopes, cflags.isFlagSet(CodeFlag.CO_NATIVE3)).parse(node);
+        ScopesCompiler scopes = new ScopesCompiler(module, module.scopes,
+                cflags.isFlagSet(CodeFlag.CO_NATIVE3));
+        scopes.setPostponedAnnotations(cflags.isFlagSet(CodeFlag.CO_FUTURE_ANNOTATIONS));
+        scopes.parse(node);
 
         // Add __doc__ if it exists
 

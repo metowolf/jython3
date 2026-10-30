@@ -150,6 +150,7 @@ public final class Py extends PrePy {
         return new PyException(Py.OverflowError, message);
     }
     public static PyObject RuntimeError;
+    public static PyObject RecursionError;
 
     public static PyException RuntimeError(String message) {
         return new PyException(Py.RuntimeError, message);
@@ -542,7 +543,8 @@ public final class Py extends PrePy {
         } else if (t instanceof InvocationTargetException) {
             return JavaError(((InvocationTargetException) t).getTargetException());
         } else if (t instanceof StackOverflowError) {
-            return Py.RuntimeError("maximum recursion depth exceeded (Java StackOverflowError)");
+            return new PyException(Native3.frame(Py.getFrame()) ? Py.RecursionError : Py.RuntimeError,
+                    "maximum recursion depth exceeded (Java StackOverflowError)");
         } else if (t instanceof OutOfMemoryError) {
             memory_error((OutOfMemoryError) t);
         } else if (t instanceof UserInterruptException) {
@@ -1080,6 +1082,7 @@ public final class Py extends PrePy {
         OSError = initExc("OSError", exc, dict);
         EOFError = initExc("EOFError", exc, dict);
         RuntimeError = initExc("RuntimeError", exc, dict);
+        RecursionError = initExc("RecursionError", exc, dict);
         NotImplementedError = initExc("NotImplementedError", exc, dict);
         NameError = initExc("NameError", exc, dict);
         UnboundLocalError = initExc("UnboundLocalError", exc, dict);
@@ -2250,13 +2253,18 @@ public final class Py extends PrePy {
 
     public static PyObject makeClass(String name, PyObject[] bases, PyCode code,
                                      PyObject[] closure_cells) {
+        return makeClass(name, bases, code, closure_cells, null);
+    }
+
+    public static PyObject makeClass(String name, PyObject[] bases, PyCode code,
+            PyObject[] closure_cells, PyObject keywords) {
+        if (code instanceof PyBaseCode
+                && (((PyBaseCode)code).co_flags.isFlagSet(CodeFlag.CO_NATIVE3) || keywords != null)) {
+            return Native3.makeClass(name, bases, (PyBaseCode)code, closure_cells, keywords);
+        }
         ThreadState state = getThreadState();
         PyObject dict = code.call(state, Py.EmptyObjects, Py.NoKeywords,
                 state.frame.f_globals, Py.EmptyObjects, new PyTuple(closure_cells));
-        if (code instanceof PyBaseCode && ((PyBaseCode)code).co_flags.isFlagSet(CodeFlag.CO_NATIVE3)
-                && bases.length == 0) {
-            bases = new PyObject[] {PyObject.TYPE};
-        }
         PyObject cell = dict.__finditem__("__classcell__");
         if (cell != null) dict.__delitem__("__classcell__");
         PyObject result = makeClass(name, bases, dict);

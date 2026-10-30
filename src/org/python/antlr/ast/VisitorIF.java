@@ -63,4 +63,14 @@ public interface VisitorIF<R> {
     public R visitExtSlice(ExtSlice node) throws Exception;
     public R visitIndex(Index node) throws Exception;
     public R visitExceptHandler(ExceptHandler node) throws Exception;
+
+    public R visitMatch(Match node) throws Exception;
+
+    public R visitMatchValue(MatchValue node) throws Exception;
+
+    public R visitMatchSingleton(MatchSingleton node) throws Exception;
+
+    public R visitMatchAs(MatchAs node) throws Exception;
+
+    public R visitMatchOr(MatchOr node) throws Exception;
 }

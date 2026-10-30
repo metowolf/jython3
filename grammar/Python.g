@@ -167,6 +167,18 @@ import java.util.ListIterator;
 }
 
 @members {
+    private boolean isMatchStatement() {
+        if (!"match".equals(input.LT(1).getText())) return false;
+        int depth = 0;
+        for (int i = 2; ; i++) {
+            int token = input.LA(i);
+            if (token == EOF || token == NEWLINE || token == SEMI) return false;
+            if (token == LPAREN || token == LBRACK || token == LCURLY) depth++;
+            if (token == RPAREN || token == RBRACK || token == RCURLY) depth--;
+            if (depth == 0 && token == COLON && input.LA(i + 1) == NEWLINE) return true;
+        }
+    }
+
     private ErrorHandler errorHandler;
 
     private GrammarActions actions = new GrammarActions();
@@ -507,7 +519,7 @@ funcdef
 @after {
     $funcdef.tree = stype;
 }
-    : decorators? DEF name_or_print parameters (RARROW r=test[expr_contextType.Load])? COLON suite[false]
+    : decorators? DEF name_or_print parameters (RARROW r=annotation_expr)? COLON suite[false]
     {
         Token t = $DEF;
         if ($decorators.start != null) {
@@ -516,6 +528,21 @@ funcdef
         stype = actions.makeFuncdef(t, $name_or_print.start, $parameters.args, $suite.stypes,
                 $decorators.etypes, actions.castExpr($r.tree));
     }
+    ;
+
+// Retain expression text without resolving annotation names.
+annotation_expr
+@init { PythonTree value = null; }
+@after { $annotation_expr.tree = value; }
+    : v=test[expr_contextType.Load]
+      {
+          value = $v.tree;
+          CommonToken first = (CommonToken)$v.start;
+          CommonToken last = (CommonToken)$v.stop;
+          if (value != null && first.getInputStream() != null) {
+              value.annotationSource = "(" + first.getInputStream().substring(first.getStartIndex(), last.getStopIndex()) + "\n)";
+          }
+      }
     ;
 
 //parameters: '(' [varargslist] ')'
@@ -549,17 +576,17 @@ varargslist[boolean allowAnnotations]
 
 parameter[ParameterList params, boolean allowAnnotations]
     : fpdef[expr_contextType.Param]
-      ({allowAnnotations}? => COLON a=test[expr_contextType.Load])?
+      ({allowAnnotations}? => COLON a=annotation_expr)?
       (ASSIGN d=test[expr_contextType.Load])?
       {
           params.add(actions.castExpr($fpdef.tree), actions.castExpr($a.tree),
                   actions.castExpr($d.tree));
       }
-    | STAR (s=NAME ({allowAnnotations}? => COLON sa=test[expr_contextType.Load])?)?
+    | STAR (s=NAME ({allowAnnotations}? => COLON sa=annotation_expr)?)?
       {
           params.addStar($STAR, $s, actions.castExpr($sa.tree));
       }
-    | DOUBLESTAR k=NAME ({allowAnnotations}? => COLON ka=test[expr_contextType.Load])?
+    | DOUBLESTAR k=NAME ({allowAnnotations}? => COLON ka=annotation_expr)?
       {
           params.addKwarg($DOUBLESTAR, $k, actions.castExpr($ka.tree));
       }
@@ -649,7 +676,7 @@ expr_stmt
         $expr_stmt.tree = stype;
     }
 }
-    : ((testlist[null] COLON) => lhs=testlist[expr_contextType.Store] COLON annotation=test[expr_contextType.Load]
+    : ((testlist[null] COLON) => lhs=testlist[expr_contextType.Store] COLON annotation=annotation_expr
         (ASSIGN av=testlist[expr_contextType.Load])?
         {
             expr target = actions.castExpr($lhs.tree);
@@ -1128,13 +1155,39 @@ assert_stmt
 
 //compound_stmt: if_stmt | while_stmt | for_stmt | try_stmt | funcdef | classdef
 compound_stmt
-    : if_stmt
+    : {isMatchStatement()}? => match_stmt
+    | if_stmt
     | while_stmt
     | for_stmt
     | try_stmt
     | with_stmt
     | (decorators? DEF) => funcdef
     | classdef
+    ;
+
+// Soft keywords: match/case remain legal identifiers elsewhere.
+match_stmt
+@init {
+    List<org.python.antlr.ast.match_case> cases = new ArrayList<org.python.antlr.ast.match_case>();
+}
+@after {
+    $match_stmt.tree = new org.python.antlr.ast.Match($m, actions.castExpr($subject.tree), cases);
+}
+    : {isMatchStatement()}? m=NAME subject=test[expr_contextType.Load]
+      COLON NEWLINE INDENT
+      (c=case_block {cases.add($c.result);})+ DEDENT
+    ;
+
+case_block returns [org.python.antlr.ast.match_case result]
+    : {"case".equals(input.LT(1).getText())}? c=NAME pat=match_pattern
+      (IF guard=test[expr_contextType.Load])? COLON suite[false]
+      {$result = new org.python.antlr.ast.match_case($c, $pat.result,
+              actions.castExpr($guard.tree), actions.castStmts($suite.stypes));}
+    ;
+
+match_pattern returns [org.python.antlr.base.pattern result]
+    : v=expr[expr_contextType.Load] {$result = PatternSupport.fromExpression(actions.castExpr($v.tree));}
+      (AS capture=NAME {$result = PatternSupport.capture($capture, $result);})?
     ;
 
 //if_stmt: 'if' test ':' suite ('elif' test ':' suite)* ['else' ':' suite]
@@ -2137,8 +2190,7 @@ dict_item[List<expr> keys, List<expr> values]
       }
     ;
 
-// Class bases are separate expressions, not a tuple expression to flatten.
-// Class keywords/metaclass selection are a separate object-model migration.
+// Class arguments share call ordering and duplicate-keyword validation.
 classdef
 @init {
     stmt stype = null;
@@ -2146,38 +2198,26 @@ classdef
 @after {
    $classdef.tree = stype;
 }
-    : decorators? CLASS NAME (LPAREN class_bases? RPAREN)? COLON suite[false]
+    : decorators? CLASS NAME (LPAREN arglist? RPAREN)? COLON suite[false]
       {
           Token t = $CLASS;
           if ($decorators.start != null) {
               t = $decorators.start;
           }
+          if ($arglist.bareGenerator) {
+              errorHandler.error("generator expression must be parenthesized", new PythonTree(t), true);
+          }
           stype = new ClassDef(t, actions.cantBeNoneName($NAME),
-              $class_bases.bases,
+              $arglist.args,
               actions.castStmts($suite.stypes),
-              actions.castExprs($decorators.etypes));
+              actions.castExprs($decorators.etypes), $arglist.keywords);
       }
-    ;
-
-class_bases returns [List<expr> bases]
-    : b+=class_base (options {k=2;}: COMMA b+=class_base)* COMMA?
-      { $bases = actions.castExprs($b); }
-    ;
-
-// Unlike display stars, class/call star operands may be conditional tests.
-class_base
-@init { expr etype = null; }
-@after { $class_base.tree = etype; }
-    : STAR operand=test[expr_contextType.Load]
-      { etype = new Starred($class_base.start, actions.castExpr($operand.tree), expr_contextType.Load); }
-    | plain=namedexpr_test[expr_contextType.Load]
-      { etype = actions.castExpr($plain.tree); }
     ;
 
 // Calls use Starred in args and keyword(null, value) for mapping expansion.
 // Legacy starargs/kwargs fields remain available to Java and hand-built ASTs.
 arglist
-    returns [List args, List keywords, expr starargs, expr kwargs]
+    returns [List args, List keywords, expr starargs, expr kwargs, boolean bareGenerator]
 @init {
     List arguments = new ArrayList();
     List<keyword> kws = new ArrayList<keyword>();
@@ -2191,6 +2231,7 @@ arglist
           }
           $args = arguments;
           $keywords = kws;
+          $bareGenerator = !gens.isEmpty();
       }
     ;
 

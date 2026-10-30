@@ -1,0 +1,4 @@
+base_class: match_case
+want_dict: true
+ctr
+incl: object

@@ -831,6 +831,16 @@ class date(object):
         y, m, d = _ord2ymd(n)
         return cls(y, m, d)
 
+    @classmethod
+    def fromisoformat(cls, value):
+        """Parse the YYYY-MM-DD form accepted by Python 3.7-3.10."""
+        if not isinstance(value, basestring):
+            raise TypeError('fromisoformat: argument must be str')
+        if (len(value) != 10 or value[4] != '-' or value[7] != '-'
+                or any(c < '0' or c > '9' for c in value[:4] + value[5:7] + value[8:])):
+            raise ValueError('Invalid isoformat string: %r' % (value,))
+        return cls(int(value[:4]), int(value[5:7]), int(value[8:]))
+
     # Conversions to string
 
     def __repr__(self):

@@ -50,6 +50,36 @@ public static final PyType TYPE = PyType.fromClass(ClassDef.class);
         this.bases = AstAdapters.py2exprList(bases);
     }
 
+    private java.util.List<keyword> keywords = new ArrayList<keyword>();
+    public java.util.List<keyword> getInternalKeywords() {
+        return keywords;
+    }
+    @ExposedGet(name = "keywords")
+    public PyObject getKeywords() {
+        return new AstList(keywords, AstAdapters.keywordAdapter);
+    }
+    @ExposedSet(name = "keywords")
+    public void setKeywords(PyObject value) {
+        keywords = AstAdapters.py2keywordList(value);
+    }
+
+    public ClassDef(Token token, String name, java.util.List<expr> bases,
+            java.util.List<stmt> body, java.util.List<expr> decorators,
+            java.util.List<keyword> keywords) {
+        this(token, name, bases, body, decorators);
+        if (keywords != null) {
+            this.keywords = keywords;
+            for (PythonTree child : keywords) addChild(child);
+        }
+    }
+
+    public ClassDef(Token token, Name name, java.util.List<expr> bases,
+            java.util.List<stmt> body, java.util.List<expr> decorators,
+            java.util.List<keyword> keywords) {
+        this(token, name.getText(), bases, body, decorators, keywords);
+        this.nameNode = name;
+    }
+
     private java.util.List<stmt> body;
     public java.util.List<stmt> getInternalBody() {
         return body;
@@ -79,7 +109,7 @@ public static final PyType TYPE = PyType.fromClass(ClassDef.class);
 
     private final static PyString[] fields =
     new PyString[] {new PyString("name"), new PyString("bases"), new PyString("body"), new
-                     PyString("decorator_list")};
+                     PyString("decorator_list"), new PyString("keywords")};
     @ExposedGet(name = "_fields")
     public PyString[] get_fields() { return fields; }
 
@@ -98,11 +128,12 @@ public static final PyType TYPE = PyType.fromClass(ClassDef.class);
     @ExposedMethod
     public void ClassDef___init__(PyObject[] args, String[] keywords) {
         ArgParser ap = new ArgParser("ClassDef", args, keywords, new String[]
-            {"name", "bases", "body", "decorator_list", "lineno", "col_offset"}, 4, true);
+            {"name", "bases", "body", "decorator_list", "lineno", "col_offset", "keywords"}, 4, true);
         setName(ap.getPyObject(0, Py.None));
         setBases(ap.getPyObject(1, Py.None));
         setBody(ap.getPyObject(2, Py.None));
         setDecorator_list(ap.getPyObject(3, Py.None));
+        setKeywords(ap.getPyObject(6, Py.None));
         int lin = ap.getInt(4, -1);
         if (lin != -1) {
             setLineno(lin);
@@ -216,6 +247,9 @@ public static final PyType TYPE = PyType.fromClass(ClassDef.class);
         sb.append("bases=");
         sb.append(dumpThis(bases));
         sb.append(",");
+        sb.append("keywords=");
+        sb.append(dumpThis(keywords));
+        sb.append(",");
         sb.append("body=");
         sb.append(dumpThis(body));
         sb.append(",");
@@ -231,6 +265,9 @@ public static final PyType TYPE = PyType.fromClass(ClassDef.class);
     }
 
     public void traverse(VisitorIF<?> visitor) throws Exception {
+        for (keyword key : keywords) {
+            if (key != null) key.traverse(visitor);
+        }
         if (bases != null) {
             for (PythonTree t : bases) {
                 if (t != null)
@@ -332,4 +369,34 @@ public static final PyType TYPE = PyType.fromClass(ClassDef.class);
         }
     }
     // End indexer support
+
+    @Override
+    public int traverse(org.python.core.Visitproc visit, Object arg) {
+        int result = super.traverse(visit, arg);
+        if (result != 0) return result;
+        if (__dict__ != null && (result = visit.visit(__dict__, arg)) != 0) return result;
+        if (nameNode != null && (result = visit.visit(nameNode, arg)) != 0) return result;
+        for (java.util.List<? extends PyObject> values : java.util.Arrays.asList(
+                bases, keywords, body, decorator_list)) {
+            if (values != null) {
+                for (PyObject value : values) {
+                    if (value != null && (result = visit.visit(value, arg)) != 0) return result;
+                }
+            }
+        }
+        return 0;
+    }
+
+    @Override
+    public boolean refersDirectlyTo(PyObject value) {
+        if (value == null) return false;
+        if (value == __dict__ || value == nameNode || super.refersDirectlyTo(value)) return true;
+        for (java.util.List<? extends PyObject> values : java.util.Arrays.asList(
+                bases, keywords, body, decorator_list)) {
+            if (values != null) {
+                for (PyObject child : values) if (child == value) return true;
+            }
+        }
+        return false;
+    }
 }

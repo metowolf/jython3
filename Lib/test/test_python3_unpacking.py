@@ -442,8 +442,11 @@ class NativeUnpackingTests(unittest.TestCase):
         eval(compile('class C(*bases):\n pass', '<class-unpacking>', 'exec'), namespace)
         self.assertEqual(namespace['C'].__bases__, (Base,))
         self.assertIsInstance(namespace['C'](), Base)
+        namespace['mapping'] = {'metaclass': type}
+        eval(compile('class Expanded(**mapping):\n pass', '<class-keywords>', 'exec'), namespace)
+        self.assertIsInstance(namespace['Expanded'], type)
         for source in ('[*x for x in []]', '(*x for x in [])', '{*x for x in []}',
-                       '{*x: 1}', 'class C(**mapping):\n pass'):
+                       '{*x: 1}'):
             with self.assertRaises(SyntaxError):
                 compile(source, '<unsupported-unpacking>', 'exec')
 

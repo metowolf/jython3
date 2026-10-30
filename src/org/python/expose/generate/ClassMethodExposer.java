@@ -22,7 +22,8 @@ public class ClassMethodExposer extends MethodExposer {
               typeName,
               asNames,
               defaults,
-              PyBuiltinClassMethodNarrow.class,
+              isWide(getArgs(onType, methodName, desc))
+                      ? org.python.core.PyBuiltinClassMethod.class : PyBuiltinClassMethodNarrow.class,
               doc);
         actualArgs = Type.getArgumentTypes(desc);
     }

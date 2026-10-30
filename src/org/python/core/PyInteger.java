@@ -40,6 +40,11 @@ public class PyInteger extends PyObject {
 
     private static final String LOOKUP = "0123456789abcdef";
 
+    @org.python.expose.ExposedClassMethod
+    public static PyObject int_from_bytes(PyType type, PyObject[] args, String[] keywords) {
+        return Native3.integerFromBytes(type, args, keywords);
+    }
+
     private final int value;
 
     public PyInteger(PyType subType, int v) {

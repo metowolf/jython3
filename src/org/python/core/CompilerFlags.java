@@ -91,6 +91,7 @@ public class CompilerFlags implements Serializable {
             | CodeFlag.CO_FUTURE_PRINT_FUNCTION.flag
             | CodeFlag.CO_FUTURE_UNICODE_LITERALS.flag
             | CodeFlag.CO_NATIVE3.flag
+            | CodeFlag.CO_FUTURE_ANNOTATIONS.flag
             | CodeFlag.CO_FUTURE_GENERATOR_STOP.flag;
 
     public static CompilerFlags getCompilerFlags(int flags, PyFrame frame) {

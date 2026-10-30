@@ -31,6 +31,8 @@ public enum FutureFeature implements Pragma {
      * Enables unicode literals.
      */
     unicode_literals(CodeFlag.CO_FUTURE_UNICODE_LITERALS),
+    /** Store annotations without evaluating names in their expressions. */
+    annotations(CodeFlag.CO_FUTURE_ANNOTATIONS),
     /**
      * Retained no-op import: PEP 479 is unconditional in this runtime.
      */

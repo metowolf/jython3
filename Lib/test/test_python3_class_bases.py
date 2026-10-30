@@ -453,10 +453,16 @@ class NativeClassBasesTests(unittest.TestCase):
         self.assertIs(type(Expanded), type(Plain))
         self.assertEqual(Expanded.__bases__, ())
 
-    def test_class_keywords_remain_explicitly_unsupported(self):
-        for header in ('metaclass=type', '*[A], metaclass=type', '**{}', '*[A], **{}'):
-            with self.assertRaises(SyntaxError):
-                compile('class C(%s): pass' % header, '<unsupported-class>', 'exec')
+    def test_class_keywords_and_mapping_expansion(self):
+        for header in ('metaclass=type', '*[A], metaclass=type',
+                       "**{'metaclass': type}", '*[A], **{}'):
+            namespace = execute('class C(%s): pass' % header)
+            self.assertIsInstance(namespace['C'], type)
+        tree = ast.parse('class C(A, metaclass=type): pass')
+        self.assertEqual(tree.body[0].keywords[0].arg, 'metaclass')
+        namespace = {'A': A, '__name__': __name__}
+        eval(compile(tree, '<class-keyword-ast>', 'exec'), namespace)
+        self.assertEqual(namespace['C'].__bases__, (A,))
 
     def test_invalid_ast_contexts_and_values(self):
         for value in (None, ast.Name(id='bases', ctx=ast.Store()),

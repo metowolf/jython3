@@ -393,4 +393,34 @@ public abstract class VisitorBase<R> implements VisitorIF<R> {
 
     abstract protected R unhandled_node(PythonTree node) throws Exception;
     abstract public void traverse(PythonTree node) throws Exception;
+
+    public R visitMatch(Match node) throws Exception {
+        R ret = unhandled_node(node);
+        traverse(node);
+        return ret;
+    }
+
+    public R visitMatchValue(MatchValue node) throws Exception {
+        R ret = unhandled_node(node);
+        traverse(node);
+        return ret;
+    }
+
+    public R visitMatchSingleton(MatchSingleton node) throws Exception {
+        R ret = unhandled_node(node);
+        traverse(node);
+        return ret;
+    }
+
+    public R visitMatchAs(MatchAs node) throws Exception {
+        R ret = unhandled_node(node);
+        traverse(node);
+        return ret;
+    }
+
+    public R visitMatchOr(MatchOr node) throws Exception {
+        R ret = unhandled_node(node);
+        traverse(node);
+        return ret;
+    }
 }

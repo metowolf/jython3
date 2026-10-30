@@ -1910,7 +1910,7 @@ public class PyType extends PyObject implements Serializable, Traverseproc {
      * @raises Py.TypeError if the all the metaclasses don't descend from the same base
      * @raises Py.TypeError if one of the bases is a PyJavaClass or a PyClass with no proxyClass
      */
-    private static PyType findMostDerivedMetatype(PyObject[] bases_list, PyType initialMetatype) {
+    static PyType findMostDerivedMetatype(PyObject[] bases_list, PyType initialMetatype) {
         PyType winner = initialMetatype;
         if (isJavaRootClass(winner)) {
             // consider this root class to be equivalent to type
@@ -2143,6 +2143,27 @@ public class PyType extends PyObject implements Serializable, Traverseproc {
              */
             return it.type;
         }
+    }
+
+    @Override
+    public PyObject __getitem__(PyObject item) {
+        if (Native3.frame(Py.getFrame())) {
+            PyObject method = __findattr__("__class_getitem__");
+            if (method != null) return method.__call__(item);
+            if (this == PyList.TYPE || this == PyTuple.TYPE || this == PyDictionary.TYPE
+                    || this == PySet.TYPE || this == PyFrozenSet.TYPE || this == TYPE) {
+                return imp.importName("_native3_types", true).__getattr__("GenericAlias").__call__(this, item);
+            }
+        }
+        return super.__getitem__(item);
+    }
+
+    @Override
+    public PyObject __or__(PyObject other) {
+        if (Native3.frame(Py.getFrame()) && (other instanceof PyType || other == Py.None)) {
+            return imp.importName("_native3_types", true).__getattr__("union").__call__(this, other);
+        }
+        return null;
     }
 
     @ExposedMethod(doc = BuiltinDocs.type___getattribute___doc)

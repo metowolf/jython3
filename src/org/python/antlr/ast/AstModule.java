@@ -28,6 +28,13 @@ public class AstModule implements ClassDictInit {
         dict.__setitem__("Assert", Assert.TYPE);
         dict.__setitem__("Assign", Assign.TYPE);
         dict.__setitem__("AnnAssign", AnnAssign.TYPE);
+        dict.__setitem__("Match", Match.TYPE);
+        dict.__setitem__("match_case", match_case.TYPE);
+        dict.__setitem__("MatchValue", MatchValue.TYPE);
+        dict.__setitem__("MatchSingleton", MatchSingleton.TYPE);
+        dict.__setitem__("MatchAs", MatchAs.TYPE);
+        dict.__setitem__("MatchOr", MatchOr.TYPE);
+        dict.__setitem__("pattern", pattern.TYPE);
         dict.__setitem__("Attribute", Attribute.TYPE);
         dict.__setitem__("AugAssign", AugAssign.TYPE);
         dict.__setitem__("BinOp", BinOp.TYPE);

@@ -19,6 +19,20 @@ public class AstAdapters {
     public final static KeywordAdapter keywordAdapter = new KeywordAdapter();
     public final static SliceAdapter sliceAdapter = new SliceAdapter();
     public final static StmtAdapter stmtAdapter = new StmtAdapter();
+    public final static TypedAstAdapter patternAdapter = new TypedAstAdapter(pattern.class);
+    public final static TypedAstAdapter match_caseAdapter = new TypedAstAdapter(match_case.class);
+
+    public static pattern py2pattern(PyObject value) {
+        return (pattern)patternAdapter.py2ast(value);
+    }
+
+    public static java.util.List<pattern> py2patternList(PyObject value) {
+        return (java.util.List<pattern>)patternAdapter.iter2ast(value);
+    }
+
+    public static java.util.List<match_case> py2match_caseList(PyObject value) {
+        return (java.util.List<match_case>)match_caseAdapter.iter2ast(value);
+    }
 
     public static java.util.List<alias> py2aliasList(PyObject o) {
         return (java.util.List<alias>)aliasAdapter.iter2ast(o);

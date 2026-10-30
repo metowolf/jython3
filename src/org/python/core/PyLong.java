@@ -25,6 +25,11 @@ import org.python.expose.MethodType;
 @ExposedType(name = "long", doc = BuiltinDocs.long_doc)
 public class PyLong extends PyObject {
 
+    @org.python.expose.ExposedClassMethod
+    public static PyObject long_from_bytes(PyType type, PyObject[] args, String[] keywords) {
+        return Native3.integerFromBytes(type, args, keywords);
+    }
+
     public static final PyType TYPE = PyType.fromClass(PyLong.class);
 
     public static final BigInteger MIN_LONG = BigInteger.valueOf(Long.MIN_VALUE);

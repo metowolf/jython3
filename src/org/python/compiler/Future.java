@@ -64,6 +64,8 @@ public class Future {
                 FutureFeature.print_function.addTo(features);
             if (cflags.isFlagSet(CodeFlag.CO_FUTURE_UNICODE_LITERALS))
                 FutureFeature.unicode_literals.addTo(features);
+            if (cflags.isFlagSet(CodeFlag.CO_FUTURE_ANNOTATIONS))
+                FutureFeature.annotations.addTo(features);
         }
         int beg = 0;
         List<stmt> suite = null;

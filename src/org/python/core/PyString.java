@@ -628,11 +628,28 @@ public class PyString extends PyBaseString implements BufferProtocol {
         return false;
     }
 
+    @Override
+    public PyObject __getitem__(PyObject index) {
+        return str___getitem__(index);
+    }
+
+    @Override
+    public PyObject __iter__() {
+        if (!(this instanceof PyUnicode) && Native3.frame(Py.getFrame())) {
+            return new PyByteArray(this).__iter__();
+        }
+        return super.__iter__();
+    }
+
     @ExposedMethod(doc = BuiltinDocs.str___getitem___doc)
     final PyObject str___getitem__(PyObject index) {
         PyObject ret = seq___finditem__(index);
         if (ret == null) {
             throw Py.IndexError("string index out of range");
+        }
+        if (!(this instanceof PyUnicode) && !(index instanceof PySlice)
+                && Native3.frame(Py.getFrame())) {
+            return Py.newInteger(((PyString)ret).getInt(0));
         }
         return ret;
     }

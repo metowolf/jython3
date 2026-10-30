@@ -240,3 +240,11 @@ org/python/antlr/op/Store.class
 org/python/antlr/op/Sub.class
 org/python/antlr/op/UAdd.class
 org/python/antlr/op/USub.class
+
+org/python/antlr/ast/Match.class
+org/python/antlr/ast/match_case.class
+org/python/antlr/ast/MatchValue.class
+org/python/antlr/ast/MatchSingleton.class
+org/python/antlr/ast/MatchAs.class
+org/python/antlr/ast/MatchOr.class
+org/python/antlr/base/pattern.class
